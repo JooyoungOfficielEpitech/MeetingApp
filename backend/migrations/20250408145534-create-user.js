@@ -10,11 +10,20 @@ module.exports = {
         type: Sequelize.INTEGER
       },
       email: {
-        type: Sequelize.STRING
+        type: Sequelize.STRING,
+        allowNull: false,
+        unique: true
       },
       passwordHash: {
-        type: Sequelize.STRING
+        type: Sequelize.STRING,
+        allowNull: true // Allow null for social logins or if email verification is needed first
       },
+      googleId: { // Add googleId here during table creation
+        type: Sequelize.STRING,
+        unique: true,
+        allowNull: true,
+      },
+      // Add other social ID fields here if needed (facebookId, kakaoId)
       name: {
         type: Sequelize.STRING
       },

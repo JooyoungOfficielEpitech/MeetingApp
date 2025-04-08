@@ -183,6 +183,16 @@ router.post('/login',
                 return;
             }
 
+            // --- Check if user has a password hash --- 
+            if (!user.passwordHash) {
+                // User exists but likely signed up via social login
+                res.status(400).json({ 
+                    message: 'This account was created using social login. Please use the corresponding social login button.' 
+                });
+                return;
+            }
+            // -------------------------------------------
+
             // Compare password
             const isMatch = await bcrypt.compare(password, user.passwordHash);
             if (!isMatch) {
