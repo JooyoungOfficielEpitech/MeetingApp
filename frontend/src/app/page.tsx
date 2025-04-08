@@ -14,20 +14,69 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    setIsLoading(true);
+    setError(null);
+
+    // Keep the admin check if needed
     if (email === 'root@root' && password === 'root') {
       console.log('Admin login successful');
+      // Maybe store admin status differently
+      // sessionStorage.setItem('isAdmin', 'true');
       alert('Redirecting to admin dashboard.');
       router.push('/admin');
+      setIsLoading(false);
       return;
     }
-    console.log('Attempting general user login (Mock)');
-    console.log({ email, password, rememberMe });
-    alert('Login successful (Mock)');
-    router.push('/main');
+
+    console.log('Attempting general user login');
+
+    try {
+        const response = await fetch('http://localhost:3001/api/auth/login', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ email, password }),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.message || '로그인에 실패했습니다. 이메일 또는 비밀번호를 확인해주세요.');
+        }
+
+        console.log('Login successful:', data);
+
+        // --- Store the JWT Token --- 
+        // Use localStorage for persistence across browser sessions
+        // Consider sessionStorage if token should clear when the tab/window is closed
+        // For more robust solutions, explore state management libraries (Zustand, Redux)
+        if (data.token) {
+            localStorage.setItem('authToken', data.token);
+            // Optionally store basic user info if needed frequently, but avoid sensitive data
+            localStorage.setItem('userInfo', JSON.stringify(data.user)); 
+            console.log('Token and user info stored in localStorage');
+        } else {
+            console.warn('No token received from server');
+            throw new Error('로그인 응답에 토큰이 없습니다.');
+        }
+        // --------------------------- 
+
+        alert('로그인 성공!');
+        router.push('/main'); // Redirect to main application page
+
+    } catch (error: any) {
+        console.error('Login Error:', error);
+        setError(error.message || '로그인 중 오류가 발생했습니다.');
+    } finally {
+        setIsLoading(false);
+    }
   };
 
   // Styles reflecting new reference image (Slate background, Amber accent)
@@ -42,7 +91,7 @@ export default function LoginPage() {
         {/* Simple Text Logo Example with New Accent Color */}
         <div className="text-center">
            {/* Replace with your actual logo if available */}
-           <span className={`text-5xl font-bold text-amber-400 ${montserrat.className}`}>Logo</span> {/* Apply Montserrat Bold to Logo */}
+           <span className={`text-5xl font-bold text-amber-400 ${montserrat.className}`}>Lo??ㅇㅇ?go</span> {/* Apply Montserrat Bold to Logo */}
            {/* <p className="mt-1 text-sm text-slate-400">CoffeeMeetsBagel</p> Optional Tagline */}
         </div>
 
@@ -114,15 +163,33 @@ export default function LoginPage() {
             </div>
           </div>
 
+          {/* Display error message */}
+          {error && (
+              <div className="text-red-400 text-sm text-center p-2 bg-red-900 bg-opacity-40 rounded-md">
+                  {error}
+              </div>
+          )}
+
           {/* Log In Button */}
           <div>
             <button
               type="submit"
-              className={`${buttonBaseStyle} bg-amber-500 hover:bg-amber-600 text-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-800 focus:ring-amber-500 ${montserrat.className} font-semibold`} // Apply Montserrat Semibold to Button 
+              disabled={isLoading}
+              className={`${buttonBaseStyle} bg-amber-500 hover:bg-amber-600 text-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-800 focus:ring-amber-500 ${montserrat.className} font-semibold ${isLoading ? 'opacity-60 cursor-not-allowed' : ''}`} // Apply Montserrat Semibold to Button 
             >
-              Log In
+              {isLoading ? 'Logging In...' : 'Log In'}
             </button>
           </div>
+
+          {/* Link to Sign Up */} 
+           <div className="text-center text-sm">
+                <span className="text-slate-400">Don't have an account? </span>
+                <Link href="/signup" legacyBehavior>
+                   <a className="font-medium text-amber-400 hover:text-amber-300">
+                       Sign up
+                   </a>
+                </Link>
+            </div>
 
           {/* Secure Connection */}
           <div className="flex items-center justify-center text-xs text-slate-500">
