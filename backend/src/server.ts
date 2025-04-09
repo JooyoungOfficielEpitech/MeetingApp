@@ -12,6 +12,7 @@ import passport from 'passport';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20'; // Import Google Strategy
 import jwt from 'jsonwebtoken'; // Import jwt for token generation
 import { Socket } from 'socket.io'; // Import Socket type
+import { authenticateToken } from './middleware/authMiddleware'; // Import authentication middleware
 
 // --- Import User model --- 
 const db = require('../models'); // Adjust path if needed
@@ -330,7 +331,8 @@ io.on('connection', (socket: any) => {
         // socket.to(matchId).emit('opponent-joined');
     });
 
-    socket.on('chat message', async (data: { matchId: string; text: string }) => {
+    // --- Handle Chat Messages --- 
+    socket.on('chat message', async (data: { matchId: string, text: string }) => {
         const { matchId, text } = data;
         // Basic validation
         if (!matchId || !text || !currentMatchId || matchId !== currentMatchId || !userId) {
@@ -376,67 +378,49 @@ io.on('connection', (socket: any) => {
         // Send message to all other clients in the same room
         socket.to(matchId).emit('chat message', messageToSendToClient);
     });
+    // ----------------------------
 
-    // --- User leaves chat room voluntarily ---
+    // --- Handle Leaving Chat Room ---
     socket.on('leave-chat-room', async (matchId: string) => {
-        if (!matchId || matchId !== currentMatchId) {
-            console.warn(`User ${userId} tried to leave invalid room. Requested: ${matchId}, Current: ${currentMatchId}`);
-            return;
-        }
-        console.log(`User ${userId} leaving room ${matchId} voluntarily.`);
-        // Notify opponent first
-        socket.to(matchId).emit('opponent-left-chat', { userId: userId });
-        // Leave the socket.io room
-        socket.leave(matchId);
-        const leavingMatchId = currentMatchId; // Store before clearing
-        currentMatchId = null; // Clear current room state for this socket
+        console.log(`User ${userId} requested to leave chat room: ${matchId}`);
+        try {
+            const match = await Match.findOne({ where: { matchId: matchId } });
+            if (match) {
+                if (match.isActive) {
+                    await match.update({ isActive: false });
+                    console.log(`Match ${matchId} deactivated in DB.`);
 
-        // --- Deactivate Match in DB --- 
-        if (leavingMatchId) {
-            try {
-                const [updatedCount] = await Match.update(
-                    { isActive: false },
-                    { where: { matchId: leavingMatchId, isActive: true } } // Only update active matches
-                );
-                if (updatedCount > 0) {
-                    console.log(`Match record ${leavingMatchId} deactivated by user ${userId}.`);
+                    // Notify the other user in the room (if they are still connected)
+                    // socket.to(matchId) targets everyone in the room *except* the sender
+                    socket.to(matchId).emit('opponent-left-chat', { userId: userId });
+                    console.log(`Notified opponent in room ${matchId} that user ${userId} left.`);
                 } else {
-                     console.log(`Match record ${leavingMatchId} was already inactive or not found when user ${userId} left.`);
+                    console.log(`Match ${matchId} was already inactive.`);
                 }
-            } catch (dbError) {
-                console.error(`Error deactivating match ${leavingMatchId} in DB when user ${userId} left:`, dbError);
+            } else {
+                console.warn(`Match ${matchId} not found in DB when trying to leave.`);
             }
+        } catch (error) {
+            console.error(`Error updating match ${matchId} status on leave:`, error);
+            // Optionally notify the leaving user about the error
+            // socket.emit('error', 'Failed to update match status on leave.');
+        } finally {
+             // Regardless of DB update success, make the user leave the Socket.IO room
+             socket.leave(matchId);
+             console.log(`User ${userId} left Socket.IO room: ${matchId}`);
+             // Optional: Explicitly disconnect the leaving user's socket after handling leave
+             // socket.disconnect(true);
         }
-        // ---------------------------
     });
+    // ------------------------------
 
-    // --- Handle Disconnection (e.g., closing tab, network issue) ---
-    socket.on('disconnect', (reason: string) => { // Keep async if other async ops remain, but not strictly needed now
-        console.log(`User disconnected: ${userId} (Socket ID: ${socket.id}, Reason: ${reason})`);
-        connectedUsers.delete(socket.id);
-        const disconnectedMatchId = currentMatchId; // Store matchId before clearing might happen implicitly
-
-        // Remove user from waiting list if they were waiting
-        if (userGender && waitingUsers[userGender]) {
-            const waitingIndex = waitingUsers[userGender].findIndex((u: ConnectedUser) => u.socketId === socket.id);
-            if (waitingIndex > -1) {
-                waitingUsers[userGender].splice(waitingIndex, 1);
-                console.log(`User ${userId} removed from waiting list (${userGender}) due to disconnect.`);
-            }
-        }
-        console.log("Waiting Lists after disconnect:", waitingUsers);
-
-        // --- Cleanup only, DO NOT notify opponent or deactivate match on simple disconnect ---
-        if (disconnectedMatchId) {
-            console.log(`Socket for user ${userId} disconnected while in room ${disconnectedMatchId}. No opponent notification sent.`);
-            // We are no longer deactivating the match here. It only deactivates on explicit leave.
-            // We are no longer emitting 'opponent-left-chat' here.
-        }
-        // ---------------------------------------------------------------------------------
+    // --- Handle Disconnection --- 
+    socket.on('disconnect', () => {
+      // ... (existing disconnect handler) ...
     });
+    // ----------------------------
 
-    // --- Add other event handlers --- 
-});
+  });
 // ----------------------------------
 
 // Swagger definition
@@ -471,6 +455,7 @@ app.use(express.json());
 // Import and use routes
 import authRoutes from './routes/auth';
 import profileRoutes from './routes/profile';
+import matchesRouter from './routes/matches';
 
 // --- Google Auth Routes (Callback Updated with Custom Handler) --- 
 // 1. Route to start Google authentication
@@ -549,7 +534,8 @@ app.get('/api/auth/google/callback',
 // --------------------------
 
 app.use('/api/auth', authRoutes); 
-app.use('/api/users', profileRoutes);
+app.use('/api/profile', authenticateToken, profileRoutes); // Apply authenticateToken middleware
+app.use('/api/matches', authenticateToken, matchesRouter); // Register matches routes with authentication
 
 const PORT = process.env.PORT || 3001; // Use a different port than frontend
 

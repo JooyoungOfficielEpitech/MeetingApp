@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UserCircleIcon } from '@heroicons/react/24/outline';
 import { useRouter } from 'next/navigation';
 import { Montserrat, Inter } from 'next/font/google'; // Import fonts
@@ -13,21 +13,77 @@ export default function MainPage() {
   // Slider value: 1 ~ 100 (km) range, initial value 10km
   const [filterValue, setFilterValue] = useState(10);
   const router = useRouter();
+  const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
+  const [isLoadingMatch, setIsLoadingMatch] = useState(true);
+  console.log("MainPage: Component rendering"); // Add this log
 
   // Mock data
   const activeUsers = 127;
   const estimatedTime = '2-3 min';
 
-  const handleMatchingStart = () => {
-    // TODO: Implement matching start logic (use selected distance filterValue)
-    console.log(`Starting matching! Distance: ${filterValue}km`);
-    router.push('/matching');
+  // --- Fetch active match on component mount ---
+  useEffect(() => {
+    console.log("MainPage: useEffect hook starting"); // Add this log
+
+    const checkActiveMatch = async () => {
+      setIsLoadingMatch(true);
+      const token = localStorage.getItem('authToken');
+      console.log("MainPage: Token retrieved:", token ? "Found" : "Not Found"); // Add this log
+
+      if (!token) {
+        console.log('MainPage: No token found, cannot check for active match.');
+        setIsLoadingMatch(false);
+        return;
+      }
+
+      try {
+        console.log("MainPage: Fetching /api/matches/active..."); // Add this log
+        const response = await fetch('http://localhost:3001/api/matches/active', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        console.log("MainPage: API response status:", response.status); // Add this log
+
+        if (response.ok) {
+          const data = await response.json();
+          setActiveMatchId(data.matchId);
+          console.log('MainPage: Active match found:', data.matchId);
+        } else if (response.status === 404) {
+           setActiveMatchId(null);
+           console.log('MainPage: No active match found.');
+        } else {
+           console.error('MainPage: Error checking active match status:', response.statusText);
+           setActiveMatchId(null); 
+        }
+      } catch (error) {
+        console.error('MainPage: Failed to fetch active match status (catch block):', error); // Modify existing log
+        setActiveMatchId(null);
+      } finally {
+        setIsLoadingMatch(false);
+      }
+    };
+
+    checkActiveMatch();
+  }, []); // Run once on mount
+
+  const handleMatchClick = () => {
+    if (isLoadingMatch) return;
+
+    if (activeMatchId) {
+      console.log(`Navigating to chat room for match: ${activeMatchId}`);
+      router.push(`/chat/${activeMatchId}`);
+    } else {
+      console.log(`Starting matching! Distance: ${filterValue}km`);
+      router.push('/matching');
+    }
   };
 
   // Profile button click handler
   const handleProfileClick = () => {
     router.push('/profile'); // Navigate to '/profile'
   };
+
+  // --- Dynamic Button Text ---
+   const buttonText = isLoadingMatch ? '상태 확인 중...' : activeMatchId ? '채팅방으로 가기' : '매칭 시작하기';
 
   return (
     <div className={`flex flex-col min-h-screen bg-black text-slate-100 ${inter.className}`}> {/* Black background, Inter font */}
@@ -83,10 +139,11 @@ export default function MainPage() {
       {/* Bottom Button */}
       <div className="sticky bottom-0 p-4 bg-black border-t border-gray-800"> {/* Black bg, adjusted border */}
         <button
-          onClick={handleMatchingStart}
-          className={`w-full bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold py-3 px-4 rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-black focus:ring-amber-500 ${montserrat.className}`} // Amber bg, rounded-full, Montserrat font, dark text, adjusted offset color
+          onClick={handleMatchClick}
+          disabled={isLoadingMatch}
+          className={`w-full bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold py-3 px-4 rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-black focus:ring-amber-500 ${montserrat.className} disabled:opacity-50`} // Amber bg, rounded-full, Montserrat font, dark text, adjusted offset color
         >
-          Find Your Match!
+          {buttonText}
         </button>
       </div>
     </div>

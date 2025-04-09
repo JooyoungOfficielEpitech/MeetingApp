@@ -1,12 +1,6 @@
 import express, { Request, Response, NextFunction, RequestHandler } from 'express';
-import { authenticateToken } from '../middleware/authMiddleware'; // Import the middleware
 const db = require('../../models');
 const User = db.User;
-
-// Extend Express Request type to include user property
-interface AuthenticatedRequest extends Request {
-    user?: { userId: string; email: string };
-}
 
 const router = express.Router();
 
@@ -19,7 +13,7 @@ const router = express.Router();
 
 /**
  * @swagger
- * /api/users/me:
+ * /api/profile/me:
  *   get:
  *     summary: Get the profile of the currently logged-in user
  *     tags: [User Profile]
@@ -31,7 +25,7 @@ const router = express.Router();
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/UserProfile' # Define UserProfile schema later
+ *               $ref: '#/components/schemas/UserProfile'
  *       401:
  *         description: Unauthorized (token missing or invalid)
  *       404:
@@ -39,26 +33,29 @@ const router = express.Router();
  *       500:
  *         description: Server error
  */
-// @ts-expect-error // Suppress persistent Express type overload error
-router.get('/me', authenticateToken, (async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+router.get('/me', (async (req: Request, res: Response, next: NextFunction) => {
+    console.log('[/api/profile/me GET] Received request. req.user:', (req as any).user);
     try {
-        const userId = req.user?.userId;
-        if (!userId) {
-            res.status(401).json({ message: 'Unauthorized: User ID not found in token' });
-            return;
-        }
+        const userId = (req as any).user?.userId;
+        console.log(`Extracted userId: ${userId}, Type: ${typeof userId}`);
 
+        if (userId === undefined || userId === null || typeof userId !== 'number') {
+             console.error('Unauthorized: User ID not found or invalid in req.user');
+             return res.status(401).json({ message: 'Unauthorized: User ID not found or invalid in token' });
+        }
+        
+        console.log(`Attempting to find user by PK: ${userId}`);
         const user = await User.findByPk(userId, {
             attributes: { exclude: ['passwordHash'] }
         });
 
         if (!user) {
-            res.status(404).json({ message: 'User not found' });
-            return;
+            console.log(`User not found for ID: ${userId}`);
+            return res.status(404).json({ message: 'User not found' });
         }
-
-        res.json(user);
-        return;
+        
+        console.log(`User found for ID: ${userId}, sending profile.`);
+        return res.json(user);
 
     } catch (error) {
         console.error('Error fetching user profile:', error);
@@ -68,7 +65,7 @@ router.get('/me', authenticateToken, (async (req: AuthenticatedRequest, res: Res
 
 /**
  * @swagger
- * /api/users/me:
+ * /api/profile/me:
  *   put:
  *     summary: Update the profile of the currently logged-in user
  *     tags: [User Profile]
@@ -105,40 +102,46 @@ router.get('/me', authenticateToken, (async (req: AuthenticatedRequest, res: Res
  *       500:
  *         description: Server error
  */
-// @ts-expect-error // Suppress persistent Express type overload error
-router.put('/me', authenticateToken, (async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+router.put('/me', (async (req: Request, res: Response, next: NextFunction) => {
+    console.log('[/api/profile/me PUT] Received request. req.user:', (req as any).user);
     try {
-        const userId = req.user?.userId;
-        if (!userId) {
-            res.status(401).json({ message: 'Unauthorized' });
-            return;
+        const userId = (req as any).user?.userId;
+        console.log(`Extracted userId for update: ${userId}, Type: ${typeof userId}`);
+
+        if (userId === undefined || userId === null || typeof userId !== 'number') {
+            console.error('Unauthorized: User ID not found or invalid for update');
+            return res.status(401).json({ message: 'Unauthorized' });
         }
 
+        console.log(`Attempting to find user for update, PK: ${userId}`);
         const user = await User.findByPk(userId);
         if (!user) {
-            res.status(404).json({ message: 'User not found' });
-            return;
+            console.log(`User not found for update, ID: ${userId}`);
+            return res.status(404).json({ message: 'User not found' });
         }
 
         // Define allowed fields to update - ADD gender, height, mbti
         const allowedUpdates = ['name', 'dob', 'weight', 'address1', 'address2', 'occupation', 'income', 'gender', 'height', 'mbti', 'phone']; // Added missing fields
         const updates: { [key: string]: any } = {};
 
+        console.log('Request body for update:', req.body);
         // Filter request body to include only allowed fields
         for (const key of allowedUpdates) {
-            if (req.body[key] !== undefined) { // Check if the key exists in the body
+            if (Object.prototype.hasOwnProperty.call(req.body, key)) { // More robust check
                 // Allow setting null explicitly for fields like dob, weight etc.
                 updates[key] = req.body[key]; 
             }
         }
+        console.log('Applying updates:', updates);
 
         // Update user (Sequelize handles partial updates)
         await user.update(updates);
+        console.log(`User ${userId} updated successfully with fields:`, Object.keys(updates));
 
         // Recalculate age if dob was updated
-        if ('dob' in updates) { // Check if dob was part of the updates
+        if ('dob' in updates) { 
+            console.log('DOB updated, recalculating age...');
             try {
-                 // Ensure dob is not null before proceeding
                  if (updates.dob) { 
                     const birthDate = new Date(updates.dob);
                     const today = new Date();
@@ -147,31 +150,32 @@ router.put('/me', authenticateToken, (async (req: AuthenticatedRequest, res: Res
                     if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
                         age--;
                     }
-                    // Update age only if calculation is valid
                     if (!isNaN(age) && age >= 0) {
                          await user.update({ age: age });
+                         console.log(`Age recalculated and updated to: ${age}`);
                     } else {
                          console.warn('Invalid date resulted in invalid age for user:', userId);
                          await user.update({ age: null }); 
+                         console.log('Age set to null due to invalid DOB calculation.');
                     }
                 } else {
-                    // DOB was explicitly set to null
                     await user.update({ age: null });
+                    console.log('DOB set to null, age also set to null.');
                 }
             } catch (error) {
                 console.error("Error calculating/updating age:", error);
-                 await user.update({ age: null }); // Reset age on error
+                 await user.update({ age: null }); 
+                 console.log('Age set to null due to error during calculation.');
             }
         }
 
-        // Refetch user data to return the updated profile (excluding password)
+        console.log(`Refetching updated user profile for ID: ${userId}`);
         const updatedUser = await User.findByPk(userId, {
              attributes: { exclude: ['passwordHash'] }
         });
 
-        // --- Respond with the updated user object --- 
-        res.json(updatedUser);
-        // ---------------------------------------------
+        console.log('Sending updated user profile back to client.');
+        return res.json(updatedUser);
 
     } catch (error) {
         console.error('Error updating user profile:', error);

@@ -26,7 +26,7 @@ function AuthCallbackContent() {
       console.log('Token stored in localStorage. Fetching user info...');
 
       // --- Fetch user info using the token --- 
-      fetch('http://localhost:3001/api/users/me', { // Ensure correct backend URL
+      fetch('http://localhost:3001/api/profile/me', { // Changed URL to /api/profile/me
         method: 'GET', // Added method for clarity
         headers: { 'Authorization': `Bearer ${token}` }
       })
