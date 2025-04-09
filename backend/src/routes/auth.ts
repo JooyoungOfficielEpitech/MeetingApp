@@ -1,4 +1,4 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express, { Request, Response, NextFunction, RequestHandler } from 'express';
 import { body, validationResult } from 'express-validator';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
@@ -218,6 +218,152 @@ router.post('/login',
             res.status(500).json({ message: 'Server error during login' });
         }
     }
+);
+
+// --- Routes for Social Login Profile Completion --- 
+
+/**
+ * @swagger
+ * /api/auth/session/profile-data:
+ *   get:
+ *     summary: Get pending social profile data from session
+ *     tags: [Authentication]
+ *     description: Retrieves temporary profile data stored in session during social sign-up flow.
+ *     responses:
+ *       200:
+ *         description: Pending profile data retrieved successfully.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 email: { type: string, format: email }
+ *                 name: { type: string }
+ *       401:
+ *         description: Unauthorized (no session or pending profile).
+ *       500:
+ *         description: Server error.
+ */
+router.get('/session/profile-data', (req: any, res: Response) => {
+    if (req.session && req.session.pendingSocialProfile) {
+        const { email, name } = req.session.pendingSocialProfile;
+        res.json({ email, name });
+    } else {
+        res.status(401).json({ message: 'No pending profile data found in session.' });
+    }
+});
+
+/**
+ * @swagger
+ * /api/auth/social/complete:
+ *   post:
+ *     summary: Complete social sign-up with additional profile info
+ *     tags: [Authentication]
+ *     description: Creates a new user using temporary session data and additional info provided by the user.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - age
+ *               - height
+ *               - gender
+ *               - mbti
+ *             properties:
+ *               age: { type: integer, minimum: 1 }
+ *               height: { type: integer, minimum: 1 }
+ *               gender: { type: string, enum: ['male', 'female', 'other'] } # Adjust enum as needed
+ *               mbti: { type: string, maxLength: 4 } # Example validation
+ *     responses:
+ *       201:
+ *         description: User created successfully, JWT token returned.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AuthResponse' # Assuming you have a schema for token response
+ *       400:
+ *         description: Invalid input data or missing session data.
+ *       401:
+ *         description: Unauthorized (no session or pending profile).
+ *       409:
+ *         description: Conflict (User with this email or social ID already exists).
+ *       500:
+ *         description: Server error.
+ */
+router.post('/social/complete',
+    // Input validation rules
+    body('age').isInt({ min: 1 }).withMessage('Age must be a positive integer'),
+    body('height').isInt({ min: 1 }).withMessage('Height must be a positive integer'),
+    body('gender').isIn(['male', 'female', 'other']).withMessage('Invalid gender value'), // Adjust allowed values
+    body('mbti').isString().isLength({ min: 4, max: 4 }).withMessage('MBTI must be 4 characters'), // Example MBTI validation
+    // Add type casting for the async handler
+    (async (req: any, res: Response, next: NextFunction) => {
+        try {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                // No explicit return needed for void promise, but okay
+                return res.status(400).json({ errors: errors.array() }); 
+            }
+
+            if (!req.session || !req.session.pendingSocialProfile) {
+                return res.status(401).json({ message: 'Unauthorized: No pending social profile data found.' }); 
+            }
+
+            // --- Correctly destructure session data --- 
+            // Get 'id' from session and rename it to 'googleId' for use in this scope
+            const { id: googleId, email, name } = req.session.pendingSocialProfile; 
+            // -------------------------------------------
+            const { age, height, gender, mbti } = req.body; 
+
+            // --- Add check if googleId was actually retrieved --- 
+            if (!googleId) {
+                 console.error('Google ID missing from session data even though pending profile exists.');
+                 req.session.pendingSocialProfile = null; // Clear potentially corrupt session data
+                 req.session.save();
+                 return res.status(400).json({ message: 'Session data is incomplete. Please try logging in again.' });
+            }
+            // ---------------------------------------------------
+
+            // Double-check if user already exists
+            const existingUser = await User.findOne({ where: { [db.Sequelize.Op.or]: [{ email }, { googleId }] } });
+            if (existingUser) {
+                req.session.pendingSocialProfile = null;
+                return res.status(409).json({ message: 'User with this email or social ID already exists.' }); 
+            }
+
+            // Create the new user with all data
+            const newUser = await User.create({
+                googleId, 
+                email,    
+                name,     
+                age,      
+                height,   
+                gender,   
+                mbti,     
+            });
+            console.log('New user created via social completion:', newUser.toJSON());
+
+            req.session.pendingSocialProfile = null; 
+            req.session.save((err: any) => {
+                 if (err) {
+                    console.error("Session save error after completing profile:", err);
+                 }
+                 const payload = { userId: newUser.id, email: newUser.email };
+                 const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
+                 res.status(201).json({ token, user: { id: newUser.id, email: newUser.email, name: newUser.name } }); 
+            });
+
+        } catch (error) {
+            console.error('Social profile completion error:', error);
+            if (req.session && req.session.pendingSocialProfile) {
+                req.session.pendingSocialProfile = null;
+                req.session.save(); // Fire and forget save
+            }
+            next(error); 
+        }
+    }) as RequestHandler
 );
 
 export default router; 

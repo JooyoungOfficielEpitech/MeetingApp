@@ -34,6 +34,18 @@ module.exports = (sequelize, DataTypes) => {
     name: DataTypes.STRING,
     dob: DataTypes.DATEONLY,
     age: DataTypes.INTEGER,
+    height: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+    gender: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    mbti: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
     weight: DataTypes.FLOAT,
     phone: DataTypes.STRING,
     address1: DataTypes.STRING,

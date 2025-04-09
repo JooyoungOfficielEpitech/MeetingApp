@@ -17,6 +17,7 @@ const db = require('../models'); // Adjust path if needed
 const User = db.User;
 // -------------------------
 
+
 // --- JWT Secret --- 
 const JWT_SECRET = process.env.JWT_SECRET || 'YOUR_VERY_SECRET_KEY_CHANGE_ME'; // Reuse or define a specific one
 // ------------------
@@ -68,45 +69,49 @@ passport.deserializeUser(async (id: string, done) => {
 });
 // ----------------------------------------------------
 
-// --- Google OAuth 2.0 Strategy Configuration --- 
+// --- Google OAuth 2.0 Strategy Configuration (Updated) --- 
 passport.use(new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID!,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
     callbackURL: process.env.GOOGLE_CALLBACK_URL || "http://localhost:3001/api/auth/google/callback",
-    scope: ['profile', 'email'] // Request profile and email information
+    scope: ['profile', 'email'],
+    passReqToCallback: true // Pass req object to the callback
   },
-  async (accessToken, refreshToken, profile, done) => {
-    // This function is called after successful authentication by Google
+  async (req: any, accessToken, refreshToken, profile, done) => {
     try {
-      console.log('Google Profile Received:', profile); // Log received profile
+      console.log('Google Profile Received:', profile);
 
-      // Find user by Google ID
       let user = await User.findOne({ where: { googleId: profile.id } });
 
-      if (!user) {
-        // If user doesn't exist, try finding by email (optional, consider security implications)
-        // user = await User.findOne({ where: { email: profile.emails?.[0]?.value } });
-        
-        // If still no user, create a new one
-        // if (!user) { 
-          user = await User.create({
-            googleId: profile.id,
-            email: profile.emails?.[0]?.value, // Make sure email is verified
+      if (user) {
+        // Existing user found
+        console.log('Existing user found via Google:', user.toJSON());
+        return done(null, user); 
+      } else {
+        // New user - Store profile temporarily
+        console.log('New user via Google, pending profile completion.');
+        const pendingProfile = {
+            provider: 'google',
+            id: profile.id,
+            email: profile.emails?.[0]?.value,
             name: profile.displayName,
-            // Set passwordHash to null or a random value for social logins? Decide strategy.
-            // passwordHash: null, 
-            // Add default values for other required fields if any
-          });
-          console.log('New user created via Google:', user.toJSON());
-        // }
+        };
+        req.session.pendingSocialProfile = pendingProfile; 
+        
+        // Explicitly save the session before calling done
+        req.session.save((err: any) => {
+            if (err) {
+                console.error("Session save error before signaling pending profile:", err);
+                return done(err, false);
+            }
+            console.log('Session saved with pending profile.');
+            // Signal that authentication is okay, but no user object yet
+            return done(null, false); 
+        });
       }
-
-      // Pass the user object to Passport
-      done(null, user);
-
     } catch (error) {
       console.error('Error in Google Strategy callback:', error);
-      done(error, undefined);
+      return done(error, false);
     }
   }
 ));
@@ -152,36 +157,62 @@ app.use(express.json());
 import authRoutes from './routes/auth';
 import profileRoutes from './routes/profile';
 
-// --- Google Auth Routes --- 
+// --- Google Auth Routes (Callback Updated with Custom Handler) --- 
 // 1. Route to start Google authentication
 app.get('/api/auth/google', 
-  passport.authenticate('google') // Redirects to Google login
+  passport.authenticate('google', { scope: ['profile', 'email'] })
 );
 
-// 2. Google callback route
+// 2. Google callback route with custom callback handler
 app.get('/api/auth/google/callback',
-  passport.authenticate('google', { 
-    failureRedirect: 'http://localhost:3000/login?error=google_auth_failed', // Redirect to frontend login on failure
-    session: false // Don't rely on session, generate JWT instead
-  }),
-  (req: any, res) => {
-    // Successful authentication, req.user should contain the user from the strategy's done() callback
-    if (!req.user) {
-        return res.redirect('http://localhost:3000/login?error=authentication_failed');
-    }
-    
-    // Generate JWT for the logged-in user
-    const payload = { userId: req.user.id, email: req.user.email }; 
-    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
+  (req: any, res, next) => { // Logging middleware (keep this)
+      console.log('\n--- Entering /google/callback route ---');
+      console.log('Session ID:', req.sessionID);
+      console.log('Session Data BEFORE authenticate:', JSON.stringify(req.session, null, 2));
+      next();
+  },
+  (req: any, res, next) => { // Replace final handler with this custom authenticate call
+    passport.authenticate('google', (err: any, user: any, info: any) => {
+      // This custom callback receives results from the strategy's done() call
+      console.log('\n--- Inside passport.authenticate custom callback ---');
+      console.log('Error:', err); 
+      console.log('User object (from done):', user); // Should be user object or false
+      console.log('Info:', info); // Additional info/messages from strategy
+      console.log('Session Data IN custom callback:', JSON.stringify(req.session, null, 2)); 
 
-    // Redirect back to the frontend, passing the token
-    // Common method: use query parameters
-    res.redirect(`http://localhost:3000/auth/callback?token=${token}`); 
+      if (err) {
+        console.error('Authentication Error from strategy:', err);
+        return res.redirect('http://localhost:3000/?error=google_auth_error'); // Specific error for strategy failure
+      }
+
+      if (user) {
+        // --- Existing User Login --- 
+        console.log('Custom Callback: Existing user authenticated. Generating JWT.');
+        const payload = { userId: user.id, email: user.email }; 
+        const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
+        return res.redirect(`http://localhost:3000/auth/callback?token=${token}`); 
+      
+      } else if (req.session && req.session.pendingSocialProfile) {
+        // --- New User - Redirect for Profile Completion --- 
+        // done(null, false) was called, user is false, but we have session data
+        console.log('Custom Callback: New user identified by session. Redirecting to complete profile.');
+        return res.redirect('http://localhost:3000/signup/complete-profile'); 
+      
+      } else {
+        // --- Authentication Failed or Unexpected State --- 
+        // This case might happen if done(null, false) was called WITHOUT setting session data properly,
+        // or if the user explicitly denied access on Google's page.
+        console.error('Custom Callback: Unexpected state or user denied access. User:', user, 'Session:', req.session);
+        // Use the info object if available (might contain failure reasons from Google)
+        const failureMsg = info?.message || 'authentication_failed_unexpected';
+        return res.redirect(`http://localhost:3000/?error=${encodeURIComponent(failureMsg)}`);
+      }
+    })(req, res, next); // Important: Immediately invoke the middleware returned by passport.authenticate
   }
 );
 // --------------------------
 
-app.use('/api/auth', authRoutes); // Mount local auth routes AFTER Google routes if they share base path
+app.use('/api/auth', authRoutes); 
 app.use('/api/users', profileRoutes);
 
 const PORT = process.env.PORT || 3001; // Use a different port than frontend
