@@ -56,8 +56,25 @@ export default function SignupPage() {
             }
 
             console.log('Signup successful:', responseData);
-            alert('회원가입이 완료되었습니다! 로그인을 진행해주세요.');
-            router.push('/');
+
+            // --- Store token and user info ---
+            if (responseData.token && responseData.user && responseData.user.id) {
+                localStorage.setItem('authToken', responseData.token);
+                localStorage.setItem('userId', responseData.user.id.toString());
+                console.log('Token and userId saved to localStorage.');
+
+                alert('회원가입이 완료되었습니다! 프로필 정보를 입력해주세요.');
+                router.push('/profile'); // Redirect to profile page
+            } else {
+                 // Handle case where token or user data (especially ID) is missing
+                 console.error('Signup success response missing token or user data (id).', responseData);
+                 setError('회원가입은 성공했지만, 사용자 정보 처리 중 오류가 발생했습니다. 다시 로그인해주세요.');
+                 // Optionally clear storage and redirect to login
+                 // localStorage.removeItem('authToken');
+                 // localStorage.removeItem('userId');
+                 // router.push('/');
+            }
+            // ---------------------------------
 
         } catch (err: any) {
             console.error('Signup Error:', err);

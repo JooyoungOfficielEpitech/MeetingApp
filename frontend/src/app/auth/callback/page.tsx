@@ -21,35 +21,61 @@ function AuthCallbackContent() {
 
     if (token) {
       console.log('Received token:', token);
-      // Store the token in localStorage
+      // Store the token in localStorage first
       localStorage.setItem('authToken', token);
-      console.log('Token stored in localStorage.');
+      console.log('Token stored in localStorage. Fetching user info...');
 
-      // --- Optional: Fetch user info using the token --- 
-      // You might want to fetch /api/users/me here to get user details
-      // and store them in state management or context if needed immediately.
-      // Example:
-      // fetch('http://localhost:3001/api/users/me', { headers: { 'Authorization': `Bearer ${token}` } }) // Use full backend URL
-      //   .then(async res => { 
-      //      if (!res.ok) { throw new Error(`Failed to fetch user info: ${res.statusText}`) } 
-      //      return res.json(); 
-      //   })
-      //   .then(userInfo => {
-      //      localStorage.setItem('userInfo', JSON.stringify(userInfo));
-      //      console.log('User info stored after token validation.', userInfo);
-      //      router.replace('/main'); // Redirect after storing user info
-      //   })
-      //   .catch(err => {
-      //      console.error('Failed to fetch user info after callback:', err);
-      //      localStorage.removeItem('authToken'); // Remove invalid token
-      //      alert('Login successful, but failed to fetch user details. Please log in again.');
-      //      router.replace('/'); // Redirect to login
-      //   });
+      // --- Fetch user info using the token --- 
+      fetch('http://localhost:3001/api/users/me', { // Ensure correct backend URL
+        method: 'GET', // Added method for clarity
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      .then(async res => { 
+         if (!res.ok) {
+             // Try to parse error message from backend
+             let errorMsg = `Failed to fetch user info: ${res.status} ${res.statusText}`;
+             try {
+                 const errorBody = await res.json();
+                 if (errorBody && errorBody.message) {
+                     errorMsg = errorBody.message;
+                 }
+             } catch { /* Ignore JSON parsing error */ }
+             // Throw error to be caught below
+             throw new Error(errorMsg);
+         }
+         return res.json(); // Parse successful response
+      })
+      .then(userInfo => {
+         // --- Store userId --- 
+         if (userInfo && userInfo.id) {
+             localStorage.setItem('userId', userInfo.id.toString()); // Store userId
+             console.log('User info fetched and userId stored.', userInfo);
+             // Optionally store the whole userInfo if needed elsewhere
+             // localStorage.setItem('userInfo', JSON.stringify(userInfo));
+
+             // Redirect AFTER successfully fetching info and storing userId
+             alert('로그인 성공! 메인 페이지로 이동합니다.');
+             router.replace('/main');
+         } else {
+              // Handle case where user info or ID is missing in response
+             console.error('User info or ID missing in response from /api/users/me', userInfo);
+              throw new Error('로그인은 성공했지만 사용자 정보를 가져올 수 없습니다.');
+         }
+         // -------------------
+      })
+      .catch(err => {
+         console.error('Failed to fetch user info after callback:', err);
+         localStorage.removeItem('authToken'); // Remove potentially invalid token
+         localStorage.removeItem('userId');   // Clear userId as well
+         // localStorage.removeItem('userInfo');
+         alert(`로그인 처리 중 오류가 발생했습니다: ${err.message}. 다시 로그인해주세요.`);
+         router.replace('/'); // Redirect to login
+      });
       // ---------------------------------------------------
       
-      // Redirect to the main application page (if not fetching user info here)
-       alert('로그인 성공! 메인 페이지로 이동합니다.');
-       router.replace('/main'); // Use replace to avoid history entry
+      // --- Remove the immediate redirect below, it happens inside .then() or .catch() now ---
+      // alert('로그인 성공! 메인 페이지로 이동합니다.');
+      // router.replace('/main');
 
     } else {
       console.warn('No token found in URL parameters.');

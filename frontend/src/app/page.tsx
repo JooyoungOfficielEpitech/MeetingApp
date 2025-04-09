@@ -57,14 +57,15 @@ export default function LoginPage() {
         // Use localStorage for persistence across browser sessions
         // Consider sessionStorage if token should clear when the tab/window is closed
         // For more robust solutions, explore state management libraries (Zustand, Redux)
-        if (data.token) {
+        if (data.token && data.user && data.user.id) {
             localStorage.setItem('authToken', data.token);
+            localStorage.setItem('userId', data.user.id.toString());
             // Optionally store basic user info if needed frequently, but avoid sensitive data
             localStorage.setItem('userInfo', JSON.stringify(data.user)); 
-            console.log('Token and user info stored in localStorage');
+            console.log('Token, userId, and userInfo stored in localStorage');
         } else {
-            console.warn('No token received from server');
-            throw new Error('로그인 응답에 토큰이 없습니다.');
+            console.warn('No token or user ID received from server', data);
+            throw new Error('로그인 응답에 토큰 또는 사용자 ID가 없습니다.');
         }
         // --------------------------- 
 

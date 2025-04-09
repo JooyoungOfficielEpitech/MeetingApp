@@ -120,14 +120,15 @@ router.put('/me', authenticateToken, (async (req: AuthenticatedRequest, res: Res
             return;
         }
 
-        // Define allowed fields to update
-        const allowedUpdates = ['name', 'dob', 'weight', 'address1', 'address2', 'occupation', 'income'];
+        // Define allowed fields to update - ADD gender, height, mbti
+        const allowedUpdates = ['name', 'dob', 'weight', 'address1', 'address2', 'occupation', 'income', 'gender', 'height', 'mbti', 'phone']; // Added missing fields
         const updates: { [key: string]: any } = {};
 
         // Filter request body to include only allowed fields
         for (const key of allowedUpdates) {
-            if (req.body[key] !== undefined) {
-                updates[key] = req.body[key];
+            if (req.body[key] !== undefined) { // Check if the key exists in the body
+                // Allow setting null explicitly for fields like dob, weight etc.
+                updates[key] = req.body[key]; 
             }
         }
 
@@ -135,23 +136,31 @@ router.put('/me', authenticateToken, (async (req: AuthenticatedRequest, res: Res
         await user.update(updates);
 
         // Recalculate age if dob was updated
-        if (updates.dob) {
+        if ('dob' in updates) { // Check if dob was part of the updates
             try {
-                const birthDate = new Date(updates.dob);
-                const today = new Date();
-                let age = today.getFullYear() - birthDate.getFullYear();
-                const m = today.getMonth() - birthDate.getMonth();
-                if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-                    age--;
-                }
-                if (!isNaN(age) && age >= 0) {
-                     await user.update({ age: age });
+                 // Ensure dob is not null before proceeding
+                 if (updates.dob) { 
+                    const birthDate = new Date(updates.dob);
+                    const today = new Date();
+                    let age = today.getFullYear() - birthDate.getFullYear();
+                    const m = today.getMonth() - birthDate.getMonth();
+                    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+                        age--;
+                    }
+                    // Update age only if calculation is valid
+                    if (!isNaN(age) && age >= 0) {
+                         await user.update({ age: age });
+                    } else {
+                         console.warn('Invalid date resulted in invalid age for user:', userId);
+                         await user.update({ age: null }); 
+                    }
                 } else {
-                     await user.update({ age: null }); // Or handle invalid date differently
+                    // DOB was explicitly set to null
+                    await user.update({ age: null });
                 }
             } catch (error) {
-                console.error("Error calculating age on update:", error);
-                 await user.update({ age: null }); // Handle error case
+                console.error("Error calculating/updating age:", error);
+                 await user.update({ age: null }); // Reset age on error
             }
         }
 
@@ -160,8 +169,9 @@ router.put('/me', authenticateToken, (async (req: AuthenticatedRequest, res: Res
              attributes: { exclude: ['passwordHash'] }
         });
 
+        // --- Respond with the updated user object --- 
         res.json(updatedUser);
-        return;
+        // ---------------------------------------------
 
     } catch (error) {
         console.error('Error updating user profile:', error);

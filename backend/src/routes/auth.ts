@@ -103,8 +103,27 @@ router.post('/signup',
             });
             console.log('New user created:', newUser.toJSON());
 
+            // --- Generate JWT for the new user --- 
+            const payload = { userId: newUser.id, email: newUser.email };
+            const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
+            // --------------------------------------
+
+            // --- Prepare user response object (exclude sensitive info) ---
+             const userResponse = { 
+                 id: newUser.id,
+                 email: newUser.email,
+                 name: newUser.name,
+                 // Add other relevant fields like gender: newUser.gender etc. if needed immediately
+             };
+            // ---------------------------------------------------------
+
+            // Respond with success message, token, and user info
             // Respond
-            res.status(201).json({ message: 'User registered successfully' });
+            res.status(201).json({ 
+                message: 'User registered successfully',
+                token: token, // Include the generated token
+                user: userResponse // Include user details 
+            });
 
         } catch (error) {
             console.error('Signup error:', error);
