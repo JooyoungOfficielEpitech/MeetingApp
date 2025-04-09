@@ -2,9 +2,11 @@ import express, { Request, Response, NextFunction, RequestHandler } from 'expres
 import { body, validationResult } from 'express-validator';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import { Op } from 'sequelize'; // Import Op for OR query
 // Import Sequelize model (adjust path/import method if needed)
 const db = require('../../models'); // Adjust if models/index.js provides types
 const User = db.User;
+const Match = db.Match; // Import Match model
 
 const router = express.Router();
 
@@ -215,22 +217,49 @@ router.post('/login',
             // Compare password
             const isMatch = await bcrypt.compare(password, user.passwordHash);
             if (!isMatch) {
-                res.status(400).json({ message: 'Invalid credentials' }); // Keep generic message
+                res.status(400).json({ message: 'Invalid credentials' });
                 return;
             }
 
+            // --- Check for active match for this user --- 
+            let activeMatchId: string | null = null;
+            try {
+                 const activeMatch = await Match.findOne({
+                     where: {
+                         [Op.or]: [
+                             { user1Id: user.id },
+                             { user2Id: user.id }
+                         ],
+                         isActive: true
+                     },
+                     order: [['createdAt', 'DESC']] // Get the most recent active match
+                 });
+                 if (activeMatch) {
+                     activeMatchId = activeMatch.matchId;
+                     console.log(`User ${user.id} has an active match: ${activeMatchId}`);
+                 }
+            } catch (matchError) {
+                 console.error(`Error checking for active match for user ${user.id}:`, matchError);
+                 // Proceed without active match info in case of error
+            }
+            // -------------------------------------------
+
             // Generate JWT
-            const payload = { userId: user.id, email: user.email }; // Use ID from DB user object
+            const payload = { userId: user.id, email: user.email };
             const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
 
-            // Respond with token and basic user info (exclude password hash)
+            // Respond with token, user info, and active match ID (if found)
             const userResponse = { // Explicitly create response object
                  id: user.id,
                  email: user.email,
                  name: user.name,
                  // Add other non-sensitive fields if needed
             };
-            res.json({ token, user: userResponse });
+            res.json({ 
+                token, 
+                user: userResponse, 
+                activeMatchId: activeMatchId // Include activeMatchId (null if none found)
+            });
 
         } catch (error) {
             console.error('Login error:', error);

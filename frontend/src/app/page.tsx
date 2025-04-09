@@ -53,24 +53,30 @@ export default function LoginPage() {
 
         console.log('Login successful:', data);
 
-        // --- Store the JWT Token --- 
-        // Use localStorage for persistence across browser sessions
-        // Consider sessionStorage if token should clear when the tab/window is closed
-        // For more robust solutions, explore state management libraries (Zustand, Redux)
+        // --- Store the JWT Token and User ID --- 
         if (data.token && data.user && data.user.id) {
             localStorage.setItem('authToken', data.token);
             localStorage.setItem('userId', data.user.id.toString());
-            // Optionally store basic user info if needed frequently, but avoid sensitive data
-            localStorage.setItem('userInfo', JSON.stringify(data.user)); 
+            localStorage.setItem('userInfo', JSON.stringify(data.user));
             console.log('Token, userId, and userInfo stored in localStorage');
+            
+            // --- Conditional Redirect based on activeMatchId ---
+            if (data.activeMatchId) {
+                console.log(`Active match found (${data.activeMatchId}), redirecting to chat.`);
+                alert('진행중인 채팅방으로 이동합니다.'); 
+                router.push(`/chat?matchId=${data.activeMatchId}`); // Redirect to chat
+            } else {
+                console.log('No active match found, redirecting to main page.');
+                alert('로그인 성공!');
+                router.push('/main'); // Redirect to main application page
+            }
+            // -------------------------------------------------
+            
         } else {
             console.warn('No token or user ID received from server', data);
             throw new Error('로그인 응답에 토큰 또는 사용자 ID가 없습니다.');
         }
         // --------------------------- 
-
-        alert('로그인 성공!');
-        router.push('/main'); // Redirect to main application page
 
     } catch (error: any) {
         console.error('Login Error:', error);

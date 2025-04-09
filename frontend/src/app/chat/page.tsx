@@ -41,43 +41,87 @@ function ChatContent() {
     const [opponentLeft, setOpponentLeft] = useState(false); // State to track if opponent left
     const [currentUserId, setCurrentUserId] = useState<number | null>(null); // State for logged-in user's ID
 
-    // --- Fetch current user ID from local storage ---
+    // --- Fetch current user ID & Handle URL Token --- 
     useEffect(() => {
-        const storedUserId = localStorage.getItem('userId'); // Ensure 'userId' is stored upon login
-        if (storedUserId) {
-            const parsedId = parseInt(storedUserId, 10);
+        const tokenFromUrl = searchParams.get('token');
+        let initialToken = localStorage.getItem('authToken');
+        let userIdFromStorage = localStorage.getItem('userId');
+
+        // If token exists in URL (e.g., from Google redirect with active match)
+        if (tokenFromUrl) {
+            console.log('ChatPage: Token found in URL, saving...');
+            localStorage.setItem('authToken', tokenFromUrl);
+            initialToken = tokenFromUrl;
+            // Clear token from URL
+            const newUrl = new URL(window.location.href);
+            newUrl.searchParams.delete('token');
+            router.replace(newUrl.pathname + newUrl.search, { scroll: false });
+            // Reset userIdFromStorage as the URL token implies a new login session
+            userIdFromStorage = null; 
+        }
+
+        // If userId is already in storage, use it
+        if (userIdFromStorage) {
+            const parsedId = parseInt(userIdFromStorage, 10);
             if (!isNaN(parsedId)) {
                 setCurrentUserId(parsedId);
-                 console.log('ChatPage: Current User ID set:', parsedId);
+                console.log('ChatPage: User ID found in localStorage:', parsedId);
             } else {
                  console.error("ChatPage: Invalid User ID found in localStorage.");
                  setError("사용자 정보가 유효하지 않습니다. 다시 로그인해주세요.");
             }
+        } else if (initialToken) {
+            // If no userId in storage BUT we have a token (from URL or existing storage)
+            // Fetch userId using the token
+            console.log('ChatPage: No userId in storage, fetching user info with token...');
+            fetch('http://localhost:3001/api/users/me', {
+                 headers: { 'Authorization': `Bearer ${initialToken}` }
+             })
+             .then(async res => {
+                 if (!res.ok) throw new Error('Failed to fetch user info for ID');
+                 return res.json();
+             })
+             .then(userInfo => {
+                 if (userInfo && userInfo.id) {
+                     localStorage.setItem('userId', userInfo.id.toString());
+                     setCurrentUserId(userInfo.id);
+                     console.log('ChatPage: User ID fetched and stored:', userInfo.id);
+                 } else {
+                     throw new Error('User ID missing in fetched data');
+                 }
+             })
+             .catch(err => {
+                  console.error("ChatPage: Error fetching user info:", err);
+                  setError("사용자 정보를 가져오는 데 실패했습니다. 다시 로그인해주세요.");
+                  localStorage.removeItem('authToken'); // Clear potentially invalid token
+             });
         } else {
-            console.error("ChatPage: User ID not found in localStorage.");
-            setError("사용자 정보를 찾을 수 없습니다. 다시 로그인해주세요.");
-            // Consider redirecting if user ID is absolutely necessary immediately
-             // router.push('/');
+            // No token and no userId
+            console.error("ChatPage: No token or userId found.");
+            setError("로그인이 필요합니다.");
         }
-    }, []); // Run once on mount
+
+    }, [searchParams, router]); // Run when searchParams change (e.g., token removal)
 
     // --- Socket connection and event handling ---
     useEffect(() => {
         // Only proceed if we have a valid matchId and user ID
         if (!matchId || currentUserId === null) {
-             if (!matchId) setError("매치 ID가 URL에 없습니다.");
-             // Error for missing userId is handled by the previous effect
-            return;
+            if (!matchId) setError("매치 ID가 URL에 없습니다.");
+            else if (currentUserId === null && !error) setError("사용자 정보 로딩 중..."); // Informative message if userId is loading
+            return; 
         }
-
-        console.log(`ChatPage: Attempting to connect for matchId: ${matchId}, userId: ${currentUserId}`);
-        setError(null); // Clear previous errors
-
-        const token = localStorage.getItem('authToken');
+        
+        const token = localStorage.getItem('authToken'); // Get potentially updated token
         if (!token) {
+             // This case should ideally be caught by the previous useEffect
              setError("인증 토큰이 없습니다. 로그인이 필요합니다.");
              return;
         }
+        
+        console.log(`ChatPage: Connecting socket for matchId: ${matchId}, userId: ${currentUserId}`);
+        setError(null); // Clear errors before connecting
+        setNotification(null);
 
         // Connect to Socket.IO server
         socketRef.current = io('http://localhost:3001', { // Replace with your backend URL if different
@@ -113,6 +157,26 @@ function ChatContent() {
              setIsConnected(false);
         });
 
+        // --- Listen for Chat History --- 
+        socket.on('chat-history', (history: { senderId: number, text: string, timestamp: number }[]) => {
+            console.log('ChatPage: Received chat history:', history);
+             if (currentUserId !== null) {
+                 // Explicitly type the result of the map to match the Message interface
+                 const formattedHistory: Message[] = history.map(msg => ({
+                     senderId: msg.senderId,
+                     text: msg.text,
+                     timestamp: msg.timestamp,
+                     sender: msg.senderId === currentUserId ? 'me' : 'other' // Assign 'me' or 'other'
+                 }));
+                 setMessages(formattedHistory);
+                 console.log('ChatPage: Formatted and set chat history.');
+             } else {
+                  console.warn("Received history but currentUserId is null, cannot format sender.");
+                   // Optionally show an error or retry logic?
+             }
+        });
+        // ------------------------------- 
+
         // Listen for incoming messages
         socket.on('chat message', (message: { senderId: number, text: string, timestamp: number }) => {
              console.log('ChatPage: Received raw message:', message);
@@ -141,10 +205,6 @@ function ChatContent() {
               // DO NOT disconnect socket or redirect automatically
          });
 
-         // Optional: Listen for chat history
-         // socket.on('chat-history', (history: Message[]) => { ... });
-
-
         // Cleanup function
         return () => {
             console.log(`ChatPage: Unmounting/cleanup for matchId: ${matchId}. Disconnecting socket.`);
@@ -154,12 +214,13 @@ function ChatContent() {
                  socketRef.current.off('connect_error');
                  socketRef.current.off('chat message');
                  socketRef.current.off('opponent-left-chat'); // Make sure to remove the new listener
+                 socketRef.current.off('chat-history'); // Remove history listener
                 socketRef.current.disconnect();
                 socketRef.current = null;
             }
         };
     // Dependencies: run effect if matchId or currentUserId changes
-    }, [matchId, currentUserId, router]);
+    }, [matchId, currentUserId, router, error]);
 
     // --- Scroll to bottom when messages change ---
     useEffect(() => {
