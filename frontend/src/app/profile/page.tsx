@@ -190,9 +190,67 @@ function ProfileContent() {
     const handleLogout = () => {
         localStorage.removeItem('authToken');
         localStorage.removeItem('userInfo');
+        localStorage.removeItem('userId'); // Ensure userId is also removed
         alert('로그아웃 되었습니다.');
         router.push('/'); 
     };
+
+    // --- Handle Account Deletion --- 
+    const handleDeleteAccount = async () => {
+        const confirmation = window.confirm("정말로 계정을 탈퇴하시겠습니까?\n이 작업은 되돌릴 수 없으며, 매칭 및 채팅 기록에 접근할 수 없게 됩니다.");
+
+        if (!confirmation) {
+            return; // User cancelled
+        }
+
+        setIsSaving(true); // Reuse saving state for loading indicator
+        setError(null);
+        const token = localStorage.getItem('authToken');
+
+        if (!token) {
+            setError('로그인이 필요합니다.');
+            alert('로그인이 필요합니다.');
+            router.replace('/');
+            return;
+        }
+
+        try {
+            const response = await fetch('http://localhost:3001/api/profile/me', {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                },
+            });
+
+            if (response.status === 204) {
+                // Success: Clear local storage and redirect
+                localStorage.removeItem('authToken');
+                localStorage.removeItem('userInfo');
+                localStorage.removeItem('userId');
+                alert('회원 탈퇴가 완료되었습니다.');
+                router.push('/'); // Redirect to login page
+            } else if (response.status === 401 || response.status === 403) {
+                localStorage.removeItem('authToken');
+                localStorage.removeItem('userInfo');
+                localStorage.removeItem('userId');
+                setError('인증 오류로 탈퇴 처리 중 문제가 발생했습니다. 다시 로그인해주세요.');
+                alert('인증 오류로 탈퇴 처리 중 문제가 발생했습니다. 다시 로그인해주세요.');
+                router.replace('/');
+            } else {
+                // Handle other errors (e.g., 404 Not Found, 500 Server Error)
+                const errorData = await response.json().catch(() => ({ message: '회원 탈퇴 처리 중 오류가 발생했습니다.' }));
+                throw new Error(errorData.message || '회원 탈퇴 처리 중 알 수 없는 오류가 발생했습니다.');
+            }
+
+        } catch (err: any) {
+            console.error('Failed to delete account:', err);
+            setError(err.message || '회원 탈퇴 중 오류 발생');
+            alert(`오류: ${err.message || '회원 탈퇴 중 오류 발생'}`);
+        } finally {
+            setIsSaving(false); // Stop loading indicator
+        }
+    };
+    // --------------------------------
 
     // Handle changes in form inputs
     const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -431,14 +489,21 @@ function ProfileContent() {
                              </div>
                         )}
 
-                        <div className="flex justify-end space-x-3 pt-4">
-                            <button type="button" onClick={handleCancel} disabled={isSaving}
-                                className={`${buttonBaseStyle} bg-slate-600 hover:bg-slate-700 text-slate-100 ${isSaving ? 'opacity-50' : ''}`}>
+                        <div className="flex justify-end mt-8 space-x-3">
+                            <button
+                                type="button"
+                                onClick={handleCancel}
+                                className={`px-6 py-2 rounded-full text-sm font-medium border border-slate-600 text-slate-300 hover:bg-slate-700 transition-colors ${inter.className} ${isSaving ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                disabled={isSaving}
+                            >
                                 Cancel
                             </button>
-                            <button type="submit" disabled={isSaving}
-                                className={`${buttonBaseStyle} bg-amber-500 hover:bg-amber-600 text-slate-900 ${montserrat.className} font-semibold ${isSaving ? 'opacity-50 cursor-not-allowed' : ''}`}>
-                                {isSaving ? 'Saving...' : 'Save Changes'}
+                            <button
+                                type="submit" // Submit the form
+                                disabled={isSaving}
+                                className={`px-6 py-2 rounded-full text-sm font-medium bg-amber-500 hover:bg-amber-600 text-slate-900 transition-colors ${montserrat.className} font-semibold ${isSaving ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            >
+                                {isSaving ? 'Saving...' : 'Save Profile'}
                             </button>
                         </div>
                     </form>
@@ -475,6 +540,27 @@ function ProfileContent() {
                 <Link href="/main" className="text-sm text-amber-400 hover:text-amber-300">
                     &larr; Back to Main
                 </Link>
+            </div>
+
+            {/* Logout and Delete Buttons - Always visible below the form/view */}
+            <div className="mt-8 pt-6 border-t border-slate-700 flex flex-col sm:flex-row justify-between items-center space-y-4 sm:space-y-0">
+                {/* Logout Button */}
+                <button
+                    onClick={handleLogout}
+                    className={`w-full sm:w-auto px-6 py-2 rounded-full text-sm font-medium border border-slate-600 text-slate-300 hover:bg-slate-700 transition-colors ${inter.className}`}
+                    disabled={isSaving} // Disable if saving/deleting
+                >
+                    Logout
+                </button>
+
+                {/* Delete Account Button */}
+                <button
+                    onClick={handleDeleteAccount}
+                    className={`w-full sm:w-auto px-6 py-2 rounded-full text-sm font-medium border border-red-700 text-red-400 hover:bg-red-900 hover:text-red-300 transition-colors ${inter.className} ${isSaving ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    disabled={isSaving} // Disable if saving/deleting
+                >
+                    Delete Account
+                </button>
             </div>
         </div>
     );

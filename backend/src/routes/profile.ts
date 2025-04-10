@@ -1,6 +1,8 @@
 import express, { Request, Response, NextFunction, RequestHandler } from 'express';
 const db = require('../../models');
 const User = db.User;
+const Match = db.Match;
+const { Op } = require("sequelize");
 
 const router = express.Router();
 
@@ -179,6 +181,72 @@ router.put('/me', (async (req: Request, res: Response, next: NextFunction) => {
 
     } catch (error) {
         console.error('Error updating user profile:', error);
+        next(error);
+    }
+}) as RequestHandler);
+
+/**
+ * @swagger
+ * /api/profile/me:
+ *   delete:
+ *     summary: Deactivate the currently logged-in user account (soft delete)
+ *     tags: [User Profile]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       204:
+ *         description: User account deactivated successfully.
+ *       401:
+ *         description: Unauthorized (token missing or invalid).
+ *       404:
+ *         description: User not found.
+ *       500:
+ *         description: Server error during deactivation.
+ */
+router.delete('/me', (async (req: Request, res: Response, next: NextFunction) => {
+    console.log('[/api/profile/me DELETE] Received request. req.user:', (req as any).user);
+    try {
+        const userId = (req as any).user?.userId;
+        console.log(`Extracted userId for delete: ${userId}`);
+
+        if (!userId || typeof userId !== 'number') {
+            console.error('Unauthorized: User ID missing or invalid for delete.');
+            return res.status(401).json({ message: 'Unauthorized' });
+        }
+
+        console.log(`Finding user to delete, PK: ${userId}`);
+        const user = await User.findByPk(userId);
+        if (!user) {
+            console.log(`User not found for deletion, ID: ${userId}`);
+            // User might already be deleted, treat as success?
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        // Soft delete the user
+        await user.destroy(); // This triggers soft delete due to paranoid: true
+        console.log(`User ${userId} soft deleted (deletedAt set).`);
+
+        // Deactivate active matches involving this user
+        console.log(`Deactivating active matches for user ${userId}...`);
+        const [updateCount] = await Match.update(
+            { isActive: false },
+            {
+                where: {
+                    [Op.or]: [
+                        { user1Id: userId },
+                        { user2Id: userId }
+                    ],
+                    isActive: true
+                }
+            }
+        );
+        console.log(`Deactivated ${updateCount} active matches for user ${userId}.`);
+
+        // Respond with success (No Content)
+        return res.status(204).send();
+
+    } catch (error) {
+        console.error(`Error deleting user profile for ID ${ (req as any).user?.userId } :`, error);
         next(error);
     }
 }) as RequestHandler);

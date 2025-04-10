@@ -52,10 +52,15 @@ module.exports = (sequelize, DataTypes) => {
     address2: DataTypes.STRING,
     occupation: DataTypes.STRING,
     income: DataTypes.STRING,
-    profilePictureUrl: DataTypes.STRING
+    profilePictureUrl: DataTypes.STRING,
+    deletedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
   }, {
     sequelize,
     modelName: 'User',
+    paranoid: true,
   });
   return User;
 };
