@@ -278,28 +278,31 @@ function ChatContent() {
         });
 
 
-        // --- Cleanup function ---
+        // --- Cleanup function on component unmount or dependency change ---
         return () => {
-            console.log(`ChatContent: Cleaning up socket for matchId: ${matchId}.`);
-            if (socketRef.current) {
-                 const socket = socketRef.current; // Use local variable
-                 socket.off('connect');
-                 socket.off('disconnect');
-                 socket.off('connect_error');
-                 socket.off('chat message');
-                 socket.off('chat-history');
-                 socket.off('error');
-                 socket.off('opponent-left-chat'); // Use the correct event name
+            console.log("ChatContent: useEffect cleanup - Disconnecting socket and removing listeners.");
+            if (newSocket) {
+                // Remove all listeners attached to this socket instance
+                newSocket.off('connect');
+                newSocket.off('disconnect');
+                newSocket.off('connect_error');
+                newSocket.off('chat-history');
+                newSocket.off('chat message');
+                newSocket.off('opponent-left-chat');
+                newSocket.off('error'); // Ensure generic error listener is also removed
 
-                socket.disconnect();
-                socketRef.current = null; // Clear the ref
-                setIsConnected(false); // Reset connection status state
+                // Disconnect the socket
+                newSocket.disconnect();
             }
+            // Clear the ref to ensure a fresh socket is created next time
+            socketRef.current = null;
+            console.log("ChatContent: Socket reference cleared.");
         };
-    // Dependencies: Re-run effect if matchId changes, or when currentUserId becomes available
-    }, [matchId, currentUserId, router]);
+    // Dependencies: Re-run effect if matchId or currentUserId changes.
+    // Also include router if it's used within the effect for redirects based on errors
+    }, [matchId, currentUserId, router]); // Added router as dependency based on usage
 
-    // --- Scroll to bottom when messages state updates ---
+    // --- Scroll to bottom when messages change ---\
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
