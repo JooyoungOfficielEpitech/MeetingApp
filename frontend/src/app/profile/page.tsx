@@ -77,7 +77,7 @@ function ProfileContent() {
         setError(null);
 
         try {
-            const response = await fetch('http://localhost:3001/api/users/me', {
+            const response = await fetch('http://localhost:3001/api/profile/me', {
                 method: 'GET',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -94,6 +94,22 @@ function ProfileContent() {
                 return;
             }
 
+            if (response.status === 404) {
+                console.log('ProfilePage: User not found (404), likely new user or invalid token for ID. Entering edit mode.');
+                localStorage.removeItem('authToken');
+                localStorage.removeItem('userId');
+                setUserProfile(null);
+                setCurrentUserId(null);
+                setFormData({
+                    name: '', dob: '', height: '', gender: '', mbti: '',
+                    weight: '', phone: '', address1: '', address2: '',
+                    occupation: '', income: ''
+                });
+                setIsEditing(true);
+                alert("환영합니다! 프로필 정보를 완성해주세요.");
+                return;
+            }
+
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ message: '프로필 정보를 가져오는데 실패했습니다.' }));
                 throw new Error(errorData.message || '프로필 정보를 가져오는데 실패했습니다.');
@@ -102,28 +118,23 @@ function ProfileContent() {
             const data: UserProfile = await response.json();
             setUserProfile(data);
 
-            // --- Store userId from fetched profile data --- 
             if (data && data.id) {
                 localStorage.setItem('userId', data.id.toString());
-                setCurrentUserId(data.id); // Update state immediately if needed elsewhere
+                setCurrentUserId(data.id);
                 console.log('ProfilePage: Fetched user data and stored userId:', data.id);
             } else {
-                 console.error("ProfilePage: User ID missing in fetched profile data.");
-                 // Handle this critical error, maybe redirect to login
-                 setError('사용자 정보를 불러왔지만 ID가 없습니다. 다시 로그인해주세요.');
-                 // Consider clearing potentially partial state
-                 setUserProfile(null);
-                 localStorage.removeItem('authToken');
-                 localStorage.removeItem('userId');
-                 router.replace('/');
-                 return; // Stop further processing
+                console.error("ProfilePage: User ID missing in fetched profile data.");
+                setError('사용자 정보를 불러왔지만 ID가 없습니다. 다시 로그인해주세요.');
+                setUserProfile(null);
+                localStorage.removeItem('authToken');
+                localStorage.removeItem('userId');
+                router.replace('/');
+                return;
             }
-            // -----------------------------------------------
 
-            // Initialize form data
             setFormData({
                 name: data.name || '',
-                dob: data.dob ? data.dob.split('T')[0] : '', // Format date for input type="date"
+                dob: data.dob ? data.dob.split('T')[0] : '',
                 height: data.height?.toString() || '',
                 gender: data.gender || '',
                 mbti: data.mbti || '',
@@ -135,18 +146,18 @@ function ProfileContent() {
                 income: data.income || '',
             });
 
-             // Automatically enable editing if profile seems incomplete
-             if (!data.gender) {
-                 console.log("Profile incomplete (gender missing), entering edit mode.");
-                 setIsEditing(true);
-                 // Optionally show a message encouraging completion
-                 alert("프로필 정보를 완성해주세요! (특히 성별)");
-             }
-             // --- ---
+            if (!data.gender) {
+                console.log("Profile incomplete (gender missing), entering edit mode.");
+                setIsEditing(true);
+                alert("프로필 정보를 완성해주세요! (특히 성별)");
+            }
 
         } catch (err: any) {
             console.error('Failed to fetch user profile:', err);
             setError(err.message || '프로필 정보 로딩 중 오류 발생');
+            setUserProfile(null);
+            localStorage.removeItem('authToken');
+            localStorage.removeItem('userId');
         } finally {
             setIsLoading(false);
         }
@@ -204,7 +215,7 @@ function ProfileContent() {
         }
 
         const dataToSend = {
-            name: formData.name || null, // Send null if empty? Or handle validation
+            name: formData.name || null,
             dob: formData.dob || null,
             height: formData.height ? parseInt(formData.height, 10) : null,
             gender: formData.gender || null,
@@ -218,7 +229,7 @@ function ProfileContent() {
         };
 
         try {
-            const response = await fetch('http://localhost:3001/api/users/me', {
+            const response = await fetch('http://localhost:3001/api/profile/me', {
                 method: 'PUT',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -227,49 +238,33 @@ function ProfileContent() {
                 body: JSON.stringify(dataToSend),
             });
 
-             if (response.status === 401 || response.status === 403) {
-                 localStorage.removeItem('authToken');
-                 localStorage.removeItem('userInfo');
-                 setError('인증이 만료되었거나 유효하지 않습니다. 다시 로그인해주세요.');
-                 alert('인증이 만료되었거나 유효하지 않습니다. 다시 로그인해주세요.');
-                 router.replace('/');
-                 // Explicitly return here after handling auth error to avoid further processing
-                 return; 
-             }
+            if (response.status === 401 || response.status === 403) {
+                localStorage.removeItem('authToken');
+                localStorage.removeItem('userInfo');
+                localStorage.removeItem('userId');
+                setError('인증이 만료되었거나 유효하지 않습니다. 다시 로그인해주세요.');
+                alert('인증이 만료되었거나 유효하지 않습니다. 다시 로그인해주세요.');
+                router.replace('/');
+                return;
+            }
 
-            // Check response status first
             if (!response.ok) {
                 let errorMessage = 'Failed to update profile';
                 try {
-                    // Try to parse error response as JSON
                     const errorData = await response.json();
                     if (errorData && errorData.message) {
                         errorMessage = errorData.message;
                     } else if (errorData && Array.isArray(errorData.errors)) {
                         errorMessage = errorData.errors.map((e: any) => e.msg).join(', ');
                     }
-                } catch (jsonError) {
-                    // If JSON parsing fails, try to get text response
-                    try {
-                        errorMessage = await response.text();
-                    } catch (textError) {
-                         // Keep default message if text parsing also fails
-                        console.error("Could not parse error response body:", textError);
-                    }
-                }
-                 // Throw error after processing the response body
+                } catch { /* Ignore JSON parse error */ }
                 throw new Error(errorMessage);
             }
 
-            // If response.ok is true, parse the successful response
             const updatedUserProfile: UserProfile = await response.json();
-
-            // --- Update local profile state with the direct response data --- 
             setUserProfile(updatedUserProfile);
-            // --------------------------------------------------------------
             setIsEditing(false);
             alert('프로필이 성공적으로 업데이트되었습니다!');
-
 
         } catch (err: any) {
             console.error('Failed to save profile:', err);

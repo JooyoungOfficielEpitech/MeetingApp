@@ -93,8 +93,8 @@ export default function MatchingPage() {
     socket.on('match-success', (data: MatchData) => {
       console.log('MatchingPage: Match success!', data);
       setIsWaiting(false);
-      // Navigate to the chat page with the matchId as a query parameter
-      router.push(`/chat?matchId=${data.matchId}`); // Changed to query parameter
+      // Navigate to the chat page using the dynamic route path
+      router.push(`/chat/${data.matchId}`); // Corrected to use dynamic route path
     });
 
     socket.on('waiting-for-match', () => {

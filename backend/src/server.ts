@@ -145,45 +145,113 @@ const io = new SocketIOServer(server, {
     }
 });
 
-// --- Socket.IO Authentication Middleware --- 
+// --- Socket.IO Authentication Middleware ---
 io.use(async (socket: Socket, next) => {
-    const token = socket.handshake.auth.token || socket.handshake.headers['authorization']?.split(' ')[1];
-    console.log("Socket trying to connect with token:", token ? "Present" : "Missing");
+    console.log(`[AuthMiddleware] Connection attempt by Socket ID: ${socket.id}`);
+    console.log(`[AuthMiddleware] Received handshake auth object:`, socket.handshake.auth); // Keep logging auth
+
+    const token = socket.handshake.auth.token;
+    const matchIdFromAuth = socket.handshake.auth.matchId; // Log received matchId
+
+    console.log(`[AuthMiddleware] Token present: ${!!token}, Match ID from auth: ${matchIdFromAuth || 'MISSING!'}`);
 
     if (!token) {
-        console.error("Socket connection error: No token provided.");
+        console.error("[AuthMiddleware] Socket connection error: No token provided.");
         return next(new Error('Authentication error: No token provided'));
     }
     try {
         const decoded = jwt.verify(token, JWT_SECRET) as { userId: number; email: string };
-        console.log("Socket authenticated for user ID:", decoded.userId);
-        
-        const user = await User.findByPk(decoded.userId, { attributes: ['id', 'gender'] }); 
+        console.log("[AuthMiddleware] Token verified for user ID:", decoded.userId);
+
+        const user = await User.findByPk(decoded.userId, { attributes: ['id', 'gender'] });
         if (!user) {
-             console.error(`Socket connection error: User not found for ID ${decoded.userId}`);
+             console.error(`[AuthMiddleware] Socket connection error: User not found for ID ${decoded.userId}`);
              return next(new Error('Authentication error: User not found'));
         }
-        
-        // Ensure gender is of type Gender or null
+
         const userGender = (user.gender && ['male', 'female', 'other'].includes(user.gender)) ? user.gender as Gender : null;
 
-        // Store user info associated with this socket
-        (socket as any).user = { userId: decoded.userId, gender: userGender }; 
+        // Store only user info, REMOVE initialMatchId storage from here
+        (socket as any).user = { userId: decoded.userId, gender: userGender };
+        console.log(`[AuthMiddleware] Stored user info on socket:`, (socket as any).user);
+
         next();
-    } catch (err) {
-        console.error("Socket connection error: Invalid token.", err);
+    } catch (err: any) {
+        console.error("[AuthMiddleware] Socket connection error: Invalid token.", err.message); // Log specific error message
         next(new Error('Authentication error: Invalid token'));
     }
 });
 // -------------------------------------------
 
-// --- Socket.IO Connection Handling --- 
+// --- Socket.IO Connection Handling ---
 io.on('connection', (socket: any) => {
+    // Ensure user object exists from middleware before proceeding
+    if (!socket.user || !socket.user.userId) {
+        console.error("Connection handler: User info missing on socket. Disconnecting.");
+        socket.disconnect(true); // Force disconnect if auth middleware failed unexpectedly
+        return;
+    }
+
     const userId: number = socket.user.userId;
     const userGender: Gender | null = socket.user.gender;
-    let currentMatchId: string | null = null; // Variable to store the room the user is in
+    // Read matchId DIRECTLY from handshake.auth within the connection handler
+    const initialMatchId: string | null = socket.handshake.auth.matchId;
+    let currentMatchId: string | null = null;
 
-    console.log(`User connected: ${userId} (Socket ID: ${socket.id}, Gender: ${userGender})`);
+    console.log(`User connected: ${userId} (Socket ID: ${socket.id}). Read initialMatchId from handshake.auth: ${initialMatchId || 'N/A'}`);
+
+    // --- Define sendChatHistory function (remains the same scope) ---
+    const sendChatHistory = async (matchIdToSendFor: string | null) => {
+        if (!matchIdToSendFor) {
+            console.log("sendChatHistory called with null matchId, skipping.");
+            return;
+        }
+        try {
+            console.log(`Fetching chat history for match: ${matchIdToSendFor}`);
+            const history = await Message.findAll({
+                where: { matchId: matchIdToSendFor },
+                order: [['createdAt', 'ASC']],
+                attributes: ['senderId', 'text', 'createdAt'],
+            });
+            const formattedHistory = history.map((msg: any) => ({
+                 senderId: msg.senderId,
+                 text: msg.text,
+                 timestamp: msg.createdAt.getTime(),
+            }));
+            console.log(`Sending chat history (${formattedHistory.length} messages) to user ${userId} for match ${matchIdToSendFor}`);
+            socket.emit('chat-history', formattedHistory);
+        } catch (error) {
+            console.error(`Error fetching chat history for match ${matchIdToSendFor}:`, error);
+            socket.emit('error', '채팅 기록을 불러오는 중 오류가 발생했습니다.');
+        }
+    };
+    // ---------------------------------------------------------
+
+    // --- Auto-join Room and Fetch History on Initial Connect ---
+    if (initialMatchId) {
+        // Verify the match is still active before joining
+        const verifyAndJoin = async () => {
+            try {
+                const match = await Match.findOne({ where: { matchId: initialMatchId, isActive: true } });
+                if (match) {
+                    socket.join(initialMatchId);
+                    currentMatchId = initialMatchId; // Set server-side tracking
+                    console.log(`User ${userId} joined active Socket.IO room: ${currentMatchId}`);
+                    sendChatHistory(currentMatchId); // Send history
+                } else {
+                    console.warn(`User ${userId} attempted to join inactive or non-existent match: ${initialMatchId}`);
+                    socket.emit('error', '만료되었거나 유효하지 않은 채팅방입니다.');
+                }
+            } catch (error) {
+                 console.error(`Error verifying match ${initialMatchId} for user ${userId}:`, error);
+                 socket.emit('error', '채팅방 상태 확인 중 오류 발생');
+            }
+        };
+        verifyAndJoin();
+    } else {
+         console.warn(`User ${userId} connected without an initialMatchId in handshake.auth.`);
+    }
+    // ---------------------------------------------------------
 
     const userInfo: ConnectedUser = { userId: userId, socketId: socket.id, gender: userGender };
     connectedUsers.set(socket.id, userInfo);
@@ -191,236 +259,176 @@ io.on('connection', (socket: any) => {
     // --- Matching Logic --- 
     socket.on('start-matching', async () => {
         console.log(`User ${userId} requested matching.`);
-        // setError(null); // Removed undefined function call
 
-        if (!userGender) { // Check if gender is null or undefined
+        if (!userGender) {
              console.warn(`User ${userId} cannot match: Gender not set or invalid.`);
              socket.emit('matching-error', '성별 정보가 설정되지 않아 매칭을 시작할 수 없습니다.');
              return;
         }
 
-        // Determine opponent gender (Only male/female for now)
         let opponentGender: Gender | null = null;
-        if (userGender === 'male') {
-            opponentGender = 'female';
-        } else if (userGender === 'female') {
-            opponentGender = 'male';
-        }
-        // TODO: Add logic for 'other' gender if needed.
+        if (userGender === 'male') opponentGender = 'female';
+        else if (userGender === 'female') opponentGender = 'male';
+        
         if (!opponentGender) {
              console.warn(`User ${userId} cannot match: Unsupported gender for matching (${userGender}).`);
              socket.emit('matching-error', '현재 성별(${userGender})은 매칭을 지원하지 않습니다.');
              return;
         }
 
-        // Check if a suitable opponent is waiting
         if (waitingUsers[opponentGender].length > 0) {
-            // --- Match Found --- 
             const opponent = waitingUsers[opponentGender].shift()!;
             console.log(`Match found for User ${userId} with User ${opponent.userId}`);
-
-            // Generate a unique match/room ID
             const matchId = `match-${userId}-${opponent.userId}-${Date.now()}`;
-
-            // --- Create Match record in DB --- 
             try {
-                 const newMatch = await Match.create({ // Use await here
-                     matchId: matchId,
-                     user1Id: userId,       // 요청한 사용자
-                     user2Id: opponent.userId, // 매칭된 상대방
-                     isActive: true       // 기본값은 true 지만 명시적으로 설정
-                 });
-                 console.log('New match record created in DB:', newMatch.toJSON());
+                 await Match.create({ matchId: matchId, user1Id: userId, user2Id: opponent.userId, isActive: true });
+                 console.log('New match record created in DB:', matchId);
             } catch (dbError) {
                 console.error('Error creating Match record in DB:', dbError);
                  io.to(socket.id).emit('matching-error', '매치 정보를 기록하는 중 오류가 발생했습니다.');
                  io.to(opponent.socketId).emit('matching-error', '매치 정보를 기록하는 중 오류가 발생했습니다.');
-                 // Put opponent back in waiting list
-                 waitingUsers[opponentGender].unshift(opponent); 
+                 waitingUsers[opponentGender].unshift(opponent);
                  console.log(`Opponent ${opponent.userId} put back in waiting list due to DB error.`);
-                 return; // Stop processing this match
+                 return;
             }
-            // ---------------------------------
-
-            // Notify both users
-            io.to(socket.id).emit('match-success', { matchId: matchId, opponentId: opponent.userId /* TODO: Add opponent details */ });
-            io.to(opponent.socketId).emit('match-success', { matchId: matchId, opponentId: userId /* TODO: Add opponent details */ });
-
-            // Sockets join the Socket.IO room 
+            io.to(socket.id).emit('match-success', { matchId: matchId, opponentId: opponent.userId });
+            io.to(opponent.socketId).emit('match-success', { matchId: matchId, opponentId: userId });
             socket.join(matchId);
             const opponentSocket = io.sockets.sockets.get(opponent.socketId);
             if (opponentSocket) {
-                opponentSocket.join(matchId);
-                console.log(`Sockets for ${userId} and ${opponent.userId} joined room ${matchId}`);
+                 opponentSocket.join(matchId);
+                 console.log(`User ${opponent.userId} also joined room ${matchId}`);
+                 currentMatchId = matchId; // Set currentMatchId for the initiator
+                 // --- Call sendChatHistory here after successful match ---
+                 sendChatHistory(currentMatchId);
+                 // ------------------------------------------------------
             } else {
-                 console.warn(`Could not find opponent socket (${opponent.socketId}) to join room ${matchId}`);
-                 // If opponent socket is gone, the match cannot proceed. Deactivate the match record. 
+                 console.warn(`Opponent socket ${opponent.socketId} not found during match setup.`);
                  try {
-                     await Match.update({ isActive: false }, { where: { matchId: matchId } });
-                     console.log(`Match record ${matchId} deactivated due to missing opponent socket.`);
-                 } catch (updateError) {
-                      console.error(`Error deactivating match record ${matchId}:`, updateError);
-                 }
-                 // Inform the original user that the match failed
-                 io.to(socket.id).emit('matching-error', '매칭된 상대방과의 연결에 실패했습니다.'); 
-                 // Don't put original user back in waiting list, they need to click again.
-                 return; 
+                      await Match.update({ isActive: false }, { where: { matchId: matchId } });
+                      console.log(`Match record ${matchId} deactivated due to missing opponent socket during match setup.`);
+                  } catch (updateError) {
+                       console.error(`Error deactivating match record ${matchId}:`, updateError);
+                  }
+                  io.to(socket.id).emit('matching-error', '매칭된 상대방과의 연결에 실패했습니다.');
+                  return;
             }
-
         } else {
-            // --- No Match Found - Add to Waiting List --- 
-            const isAlreadyWaiting = waitingUsers[userGender].some((u: ConnectedUser) => u.userId === userId);
-            if (!isAlreadyWaiting) {
-                console.log(`User ${userId} added to waiting list (${userGender}).`);
+            console.log(`No opponent found for ${userGender}, adding User ${userId} to waiting list.`);
+             if (!waitingUsers[userGender].some((u: ConnectedUser) => u.userId === userId)) {
                 waitingUsers[userGender].push(userInfo);
-                socket.emit('waiting-for-match');
-            } else {
-                console.log(`User ${userId} is already waiting.`);
-                 socket.emit('already-waiting');
-            }
+             } else {
+                console.log(`User ${userId} is already in the waiting list.`);
+             }
+             console.log("Waiting Lists:", waitingUsers);
+             socket.emit('waiting-for-match');
         }
-        console.log("Waiting Lists:", waitingUsers); 
-    });
-
-    // --- Chat Room Logic --- 
-    socket.on('join-chat-room', async (matchId: string) => {
-        if (!matchId) {
-            console.warn(`User ${userId} attempted to join null/undefined room.`);
-            // Optionally emit an error back to the client
-            // socket.emit('chat-error', 'Invalid Match ID provided.');
-            return;
-        }
-        console.log(`User ${userId} (Socket: ${socket.id}) joining room: ${matchId}`);
-        socket.join(matchId);
-        currentMatchId = matchId; // Store the current room
-
-        // --- Fetch and send chat history --- 
-        try {
-            const history = await Message.findAll({
-                where: { matchId: matchId },
-                order: [['timestamp', 'ASC']], 
-                limit: 100 
-            });
-            
-            // Define an interface for the message object from DB (adjust types as needed)
-            interface DbMessage {
-                senderId: number;
-                text: string;
-                timestamp: Date; // Sequelize returns Date objects for DATE type
-                // Add other fields if needed
-            }
-
-            // Format messages for the client, applying the type to the map parameter
-            const formattedHistory = history.map((msg: DbMessage) => ({
-                senderId: msg.senderId,
-                text: msg.text,
-                timestamp: msg.timestamp.getTime() // Send timestamp as number
-            }));
-
-            // Send history only to the user who just joined
-            socket.emit('chat-history', formattedHistory);
-            console.log(`Sent chat history (${formattedHistory.length} messages) for room ${matchId} to user ${userId}`);
-
-        } catch (dbError) {
-            console.error(`Error fetching chat history for room ${matchId}:`, dbError);
-            socket.emit('chat-error', '채팅 기록을 불러오는 중 오류가 발생했습니다.');
-        }
-        // ---------------------------------
-
-        // Optional: Notify the other user in the room that someone joined?
-        // socket.to(matchId).emit('opponent-joined');
     });
 
     // --- Handle Chat Messages --- 
     socket.on('chat message', async (data: { matchId: string, text: string }) => {
-        const { matchId, text } = data;
-        // Basic validation
-        if (!matchId || !text || !currentMatchId || matchId !== currentMatchId || !userId) {
-             console.warn(`Invalid chat message received. User: ${userId}, Data:`, data, `Current Room: ${currentMatchId}`);
+         const { matchId: messageMatchId, text } = data;
+
+         // Validate against the server's tracked currentMatchId for this socket
+         if (!userId || messageMatchId !== currentMatchId) { // Use currentMatchId set by server
+             console.warn(`User ${userId} msg rejected. MsgMatchId: ${messageMatchId}, Server's currentMatchId: ${currentMatchId}`);
+             socket.emit('error', '메시지를 보낼 수 없는 방입니다.'); // Send specific error
              return;
-        }
+         }
 
-        console.log(`Message from User ${userId} in room ${matchId}: ${text}`);
+         // Additional check: Ensure match is still active in DB before saving/sending
+         try {
+             const match = await Match.findOne({ where: { matchId: messageMatchId, isActive: true } });
+             if (!match) {
+                 console.warn(`Match ${messageMatchId} is not active. Message from ${userId} rejected.`);
+                 socket.emit('error', '비활성화된 채팅방에는 메시지를 보낼 수 없습니다.');
+                 return;
+             }
 
-        // Prepare message object to broadcast and save
-        const messageData = {
-            matchId: matchId,
-            senderId: userId, 
-            text: text,
-            timestamp: new Date() // Use server time for consistency in DB
-        };
+            const trimmedText = text.trim();
+            if (!trimmedText || trimmedText.length === 0 || trimmedText.length > 500) {
+                 console.warn(`User ${userId} sent invalid message text.`);
+                 socket.emit('error', '메시지 내용이 유효하지 않습니다.');
+                 return;
+            }
 
-        // --- Save message to Database --- 
-        try {
-            await Message.create({
-                matchId: messageData.matchId,
-                senderId: messageData.senderId,
-                text: messageData.text,
-                timestamp: messageData.timestamp
+            console.log(`Saving message from user ${userId} for match ${messageMatchId}`);
+            const newMessage = await Message.create({
+                matchId: messageMatchId,
+                senderId: userId,
+                text: trimmedText,
+                timestamp: new Date()
             });
-            console.log(`Message from ${userId} saved to DB for match ${matchId}.`);
-        } catch (dbError) {
-            console.error(`Error saving message to DB for match ${matchId}:`, dbError);
-            // Notify sender about the error?
-             socket.emit('chat-error', '메시지를 저장하는 중 오류가 발생했습니다.');
-             // Don't proceed to broadcast if DB save fails?
-             return; 
-        }
-        // -------------------------------
+            console.log(`Message saved with ID: ${newMessage.id}`);
 
-        // Prepare message object to broadcast (might differ slightly from DB object)
-        const messageToSendToClient = {
-            senderId: messageData.senderId,
-            text: messageData.text,
-            timestamp: messageData.timestamp.getTime() // Send timestamp as number to client
-        };
+            const messageToSendToClient = {
+                 senderId: userId,
+                 text: trimmedText,
+                 timestamp: newMessage.createdAt.getTime(),
+            };
 
-        // Send message to all other clients in the same room
-        socket.to(matchId).emit('chat message', messageToSendToClient);
+            console.log(`Broadcasting message to room ${messageMatchId} (excluding sender ${userId})`);
+            socket.to(messageMatchId).emit('chat message', messageToSendToClient);
+            console.log(`Broadcast successful for message ID: ${newMessage.id}`);
+
+         } catch (error: any) {
+             console.error(`[ERROR] Failed processing 'chat message' for match ${messageMatchId} from user ${userId}:`, error);
+             socket.emit('error', '메시지 저장 또는 전송 중 오류 발생');
+         }
     });
-    // ----------------------------
 
-    // --- Handle Leaving Chat Room ---
-    socket.on('leave-chat-room', async (matchId: string) => {
-        console.log(`User ${userId} requested to leave chat room: ${matchId}`);
+    // --- Handle Force Leaving Chat Room (Permanent) ---
+    socket.on('force-leave-chat', async (matchId: string) => {
+        console.log(`User ${userId} requested to FORCE LEAVE chat room: ${matchId}`);
         try {
             const match = await Match.findOne({ where: { matchId: matchId } });
             if (match) {
                 if (match.isActive) {
-                    await match.update({ isActive: false });
-                    console.log(`Match ${matchId} deactivated in DB.`);
-
-                    // Notify the other user in the room (if they are still connected)
-                    // socket.to(matchId) targets everyone in the room *except* the sender
-                    socket.to(matchId).emit('opponent-left-chat', { userId: userId });
-                    console.log(`Notified opponent in room ${matchId} that user ${userId} left.`);
+                    await match.update({ isActive: false }); // Deactivate the match
+                    console.log(`Match ${matchId} DEACTIVATED in DB by user ${userId}.`);
+                    socket.to(matchId).emit('opponent-left-chat', { userId: userId }); // Use existing event name
+                    console.log(`Notified room ${matchId} that user ${userId} has left permanently.`);
                 } else {
-                    console.log(`Match ${matchId} was already inactive.`);
+                    console.log(`Match ${matchId} was already inactive when user ${userId} tried to force leave.`);
                 }
             } else {
-                console.warn(`Match ${matchId} not found in DB when trying to leave.`);
+                console.warn(`Match ${matchId} not found in DB when trying to force leave.`);
             }
         } catch (error) {
-            console.error(`Error updating match ${matchId} status on leave:`, error);
-            // Optionally notify the leaving user about the error
-            // socket.emit('error', 'Failed to update match status on leave.');
+            console.error(`Error deactivating match ${matchId} on force leave:`, error);
         } finally {
-             // Regardless of DB update success, make the user leave the Socket.IO room
              socket.leave(matchId);
              console.log(`User ${userId} left Socket.IO room: ${matchId}`);
-             // Optional: Explicitly disconnect the leaving user's socket after handling leave
-             // socket.disconnect(true);
+             if (currentMatchId === matchId) {
+                 currentMatchId = null;
+             }
         }
     });
-    // ------------------------------
+    // -----------------------------------------------
 
-    // --- Handle Disconnection --- 
-    socket.on('disconnect', () => {
-      // ... (existing disconnect handler) ...
+    // --- Handle Disconnection (Unexpected or Back Button) ---
+    socket.on('disconnect', (reason: string) => {
+      console.log(`User disconnected: ${userId} (Socket ID: ${socket.id}, Reason: ${reason})`);
+      connectedUsers.delete(socket.id);
+      const disconnectedMatchId = currentMatchId;
+
+      // Remove user from waiting list if they were waiting
+      if (userGender && waitingUsers[userGender]) {
+            const waitingIndex = waitingUsers[userGender].findIndex((u: ConnectedUser) => u.socketId === socket.id);
+            if (waitingIndex > -1) {
+                waitingUsers[userGender].splice(waitingIndex, 1);
+                console.log(`User ${userId} removed from waiting list (${userGender}) due to disconnect.`);
+            }
+      }
+      console.log("Waiting Lists after disconnect:", waitingUsers);
+
+      // DO NOT notify opponent or deactivate match on simple disconnect
+      if (disconnectedMatchId) {
+           console.log(`Socket for user ${userId} disconnected (Reason: ${reason}) while associated with room ${disconnectedMatchId}. No action taken.`);
+      }
     });
-    // ----------------------------
-
-  });
+    // ----------------------------------------------------
+});
 // ----------------------------------
 
 // Swagger definition
