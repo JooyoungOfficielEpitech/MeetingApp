@@ -48,7 +48,7 @@ export default function LoginPage() {
         const data = await response.json();
 
         if (!response.ok) {
-            throw new Error(data.message || '로그인에 실패했습니다. 이메일 또는 비밀번호를 확인해주세요.');
+            throw new Error(data.message || 'Login failed. Please check your email or password.');
         }
 
         console.log('Login successful:', data);
@@ -63,19 +63,19 @@ export default function LoginPage() {
             
             // --- Always redirect to main page after successful login ---
             console.log('Login successful, redirecting to main page.');
-            alert('로그인 성공!'); // Keep success alert
+            alert('Login successful!'); // Keep success alert
             router.push('/main'); // Redirect to main application page
             // ---------------------------------------------------------
             
         } else {
             console.warn('No token or user ID received from server', data);
-            throw new Error('로그인 응답에 토큰 또는 사용자 ID가 없습니다.');
+            throw new Error('Login response is missing token or user ID.');
         }
         // --------------------------- 
 
     } catch (error: any) {
         console.error('Login Error:', error);
-        setError(error.message || '로그인 중 오류가 발생했습니다.');
+        setError(error.message || 'An error occurred during login.');
     } finally {
         setIsLoading(false);
     }

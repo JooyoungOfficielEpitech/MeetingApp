@@ -36,7 +36,7 @@ export default function MatchingPage() {
     const token = localStorage.getItem('authToken');
     if (!token) {
       console.error('MatchingPage: No auth token found. Redirecting to login.');
-      setError('인증 토큰이 없습니다. 로그인이 필요합니다.');
+      setError('Authentication token not found. Login required.');
       setIsConnecting(false);
       // Optionally redirect to login page
       // router.push('/auth/login'); 
@@ -71,7 +71,7 @@ export default function MatchingPage() {
       setIsWaiting(false);
       // Handle unexpected disconnects if necessary
       if (reason !== 'io client disconnect') {
-         setError('서버와의 연결이 끊어졌습니다. 다시 시도해주세요.');
+         setError('Connection to server lost. Please try again.');
       }
     });
 
@@ -81,12 +81,12 @@ export default function MatchingPage() {
       setIsConnected(false);
       setIsWaiting(false);
       if (err.message.includes('Authentication error')) {
-          setError('인증에 실패했습니다. 다시 로그인해주세요.');
+          setError('Authentication failed. Please log in again.');
           // Optionally clear token and redirect to login
           // localStorage.removeItem('authToken');
           // router.push('/auth/login');
       } else {
-          setError('서버에 연결할 수 없습니다.');
+          setError('Cannot connect to the server.');
       }
     });
 
@@ -144,18 +144,18 @@ export default function MatchingPage() {
       socketRef.current.disconnect();
       console.log('MatchingPage: Manually disconnected socket.');
     }
-    alert('매칭 요청이 취소되었습니다.'); // More direct feedback
+    alert('Matching request cancelled.'); // More direct feedback
     router.push('/main'); // Go back to the main screen
   };
 
   // --- Render Logic ---
-  let statusText = '서버에 연결 중...';
+  let statusText = 'Connecting to server...';
   if (!isConnecting && error) {
-    statusText = `오류: ${error}`;
+    statusText = `Error: ${error}`;
   } else if (isConnected && isWaiting) {
-    statusText = '매칭 상대를 찾고 있습니다...';
+    statusText = 'Finding a match...';
   } else if (!isConnected && !isConnecting) {
-      statusText = '연결 끊김. 다시 시도해주세요.';
+      statusText = 'Disconnected. Please try again.';
   }
 
   return (
@@ -164,7 +164,7 @@ export default function MatchingPage() {
       <div className="mb-8 md:mb-16">
          <h1 className={`text-3xl md:text-4xl font-bold mb-2 flex items-center justify-center gap-2 ${montserrat.className}`}> {/* Montserrat font */}
            <SparklesIcon className="h-8 w-8 md:h-10 md:w-10 text-amber-400" /> {/* Amber accent */}
-           {isWaiting ? '매칭 상대를 찾는 중' : (error ? '매칭 오류' : '연결 중...')}
+           {isWaiting ? 'Finding Match' : (error ? 'Matching Error' : 'Connecting...')}
            <SparklesIcon className="h-8 w-8 md:h-10 md:w-10 text-amber-400" /> {/* Amber accent */}
         </h1>
         <p className="text-slate-400">{statusText}</p> {/* Adjusted text color */}
@@ -172,17 +172,17 @@ export default function MatchingPage() {
 
       {/* Central Animation Area */}
       <div className={`w-40 h-40 md:w-64 md:h-64 rounded-full bg-gray-950 border-4 border-amber-500 flex items-center justify-center ${isWaiting || isConnecting ? 'animate-pulse' : ''} mb-10 md:mb-20`}> {/* Dark gray bg, Amber border */}
-        {isConnecting && <span className="text-slate-500 text-sm">(연결 중...)</span>}
-        {isConnected && isWaiting && <span className="text-slate-500 text-sm">(검색 중...)</span>}
+        {isConnecting && <span className="text-slate-500 text-sm">(Connecting...)</span>}
+        {isConnected && isWaiting && <span className="text-slate-500 text-sm">(Searching...)</span>}
         {error && <ExclamationTriangleIcon className="h-16 w-16 text-red-500" />}
-         {!isConnecting && !isConnected && !error && <span className="text-slate-500 text-sm">(연결 끊김)</span>}
+         {!isConnecting && !isConnected && !error && <span className="text-slate-500 text-sm">(Disconnected)</span>}
       </div>
 
       {/* Information Text (Show only when waiting) */}
       {(isWaiting || isConnecting) && !error && (
         <ul className={`space-y-2 text-slate-300 mb-10 md:mb-16 list-disc list-inside text-left max-w-xs mx-auto ${montserrat.className}`}> {/* Adjusted text color, Montserrat font */}
-          <li className="marker:text-amber-400">근처의 활동 중인 사용자를 찾고 있습니다</li> {/* Translated, Amber marker */}
-          <li className="marker:text-amber-400">연결될 때까지 프로필은 비공개로 유지됩니다</li> {/* Translated, Amber marker */}
+          <li className="marker:text-amber-400">Searching for active users nearby</li> {/* Translated, Amber marker */}
+          <li className="marker:text-amber-400">Your profile remains private until connected</li> {/* Translated, Amber marker */}
         </ul>
       )}
 
@@ -190,12 +190,12 @@ export default function MatchingPage() {
        {error && (
            <div className="text-red-400 mb-10 md:mb-16 max-w-xs mx-auto">
                <p>{error}</p>
-               {error.includes("로그인") && <button onClick={() => router.push('/auth/login')} className="mt-2 text-amber-400 underline">로그인 페이지로 이동</button>}
+               {error.includes("Login required") && <button onClick={() => router.push('/')} className="mt-2 text-amber-400 underline">Go to Login Page</button>}
            </div>
        )}
 
       {/* Cancel Button (Show unless there's a non-auth error after connection attempt) */}
-       { (!error || (error && error.includes('인증'))) && // Show cancel unless connection totally failed
+       { (!error || (error && error.includes('Authentication failed'))) && // Show cancel unless connection totally failed
            <div className="w-full max-w-xs mt-12 md:mt-20">
                <button
                  onClick={handleCancelMatching}
@@ -203,12 +203,12 @@ export default function MatchingPage() {
                  className={`w-full flex items-center justify-center gap-2 bg-gray-800 hover:bg-gray-700 text-slate-300 font-semibold py-3 px-4 rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-black focus:ring-amber-500 ${montserrat.className} disabled:opacity-50 disabled:cursor-not-allowed`}
                >
                  <XMarkIcon className="h-5 w-5" />
-                 매칭 요청 취소
+                 Cancel Matching Request
                </button>
                {/* Penalty Warning */}
                 <p className={`mt-3 text-xs text-amber-500 flex items-center justify-center gap-1 ${montserrat.className}`}> 
                    <ExclamationTriangleIcon className="h-4 w-4" />
-                   취소 시 페널티가 부과될 수 있습니다
+                   A penalty may apply upon cancellation
                </p>
            </div>
        }

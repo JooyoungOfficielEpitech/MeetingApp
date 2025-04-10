@@ -54,12 +54,12 @@ function AuthCallbackContent() {
              // localStorage.setItem('userInfo', JSON.stringify(userInfo));
 
              // Redirect AFTER successfully fetching info and storing userId
-             alert('로그인 성공! 메인 페이지로 이동합니다.');
+             alert('Login successful! Redirecting to the main page.');
              router.replace('/main');
          } else {
               // Handle case where user info or ID is missing in response
              console.error('User info or ID missing in response from /api/users/me', userInfo);
-              throw new Error('로그인은 성공했지만 사용자 정보를 가져올 수 없습니다.');
+              throw new Error('Login was successful, but user information could not be retrieved.');
          }
          // -------------------
       })
@@ -68,7 +68,7 @@ function AuthCallbackContent() {
          localStorage.removeItem('authToken'); // Remove potentially invalid token
          localStorage.removeItem('userId');   // Clear userId as well
          // localStorage.removeItem('userInfo');
-         alert(`로그인 처리 중 오류가 발생했습니다: ${err.message}. 다시 로그인해주세요.`);
+         alert(`An error occurred during login processing: ${err.message}. Please log in again.`);
          router.replace('/'); // Redirect to login
       });
       // ---------------------------------------------------
@@ -90,8 +90,8 @@ function AuthCallbackContent() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">
       <div className="text-center">
-        <p className="text-xl font-semibold">인증 처리 중...</p>
-        <p className="text-gray-400 mt-2">잠시만 기다려주세요.</p>
+        <p className="text-xl font-semibold">Processing authentication...</p>
+        <p className="text-gray-400 mt-2">Please wait a moment.</p>
         {/* Optional: Add a spinner */}
       </div>
     </div>

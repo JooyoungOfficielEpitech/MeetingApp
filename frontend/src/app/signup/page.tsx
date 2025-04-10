@@ -28,7 +28,7 @@ export default function SignupPage() {
         setError(null);
 
         if (password !== passwordConfirm) {
-            setError('비밀번호가 일치하지 않습니다.');
+            setError('Passwords do not match.');
             setIsLoading(false);
             return;
         }
@@ -48,9 +48,9 @@ export default function SignupPage() {
             const responseData = await response.json();
 
             if (!response.ok) {
-                let errorMessage = responseData.message || '회원가입 중 오류 발생';
+                let errorMessage = responseData.message || 'An error occurred during signup.';
                 if (responseData.errors && Array.isArray(responseData.errors)) {
-                    errorMessage = responseData.errors.map((err: any) => err.msg || '유효성 검사 오류').join(', ');
+                    errorMessage = responseData.errors.map((err: any) => err.msg || 'Validation error').join(', ');
                 }
                 throw new Error(errorMessage);
             }
@@ -63,12 +63,12 @@ export default function SignupPage() {
                 localStorage.setItem('userId', responseData.user.id.toString());
                 console.log('Token and userId saved to localStorage.');
 
-                alert('회원가입이 완료되었습니다! 프로필 정보를 입력해주세요.');
+                alert('Signup complete! Please fill in your profile information.');
                 router.push('/profile'); // Redirect to profile page
             } else {
                  // Handle case where token or user data (especially ID) is missing
                  console.error('Signup success response missing token or user data (id).', responseData);
-                 setError('회원가입은 성공했지만, 사용자 정보 처리 중 오류가 발생했습니다. 다시 로그인해주세요.');
+                 setError('Signup was successful, but an error occurred while processing user information. Please log in again.');
                  // Optionally clear storage and redirect to login
                  // localStorage.removeItem('authToken');
                  // localStorage.removeItem('userId');
@@ -78,7 +78,7 @@ export default function SignupPage() {
 
         } catch (err: any) {
             console.error('Signup Error:', err);
-            setError(err.message || '회원가입 중 오류가 발생했습니다.');
+            setError(err.message || 'An error occurred during signup.');
         } finally {
             setIsLoading(false);
         }

@@ -66,7 +66,7 @@ function ChatContent() {
                 console.log('ChatContent: User ID found in localStorage:', parsedId);
             } else {
                  console.error("ChatContent: Invalid User ID found in localStorage.");
-                 setError("사용자 정보가 유효하지 않습니다. 다시 로그인해주세요.");
+                 setError("User information is invalid. Please log in again.");
                  localStorage.removeItem('userId'); // Remove invalid ID
                  localStorage.removeItem('authToken'); // Also remove token as state is inconsistent
                  router.push('/'); // Redirect to login
@@ -99,9 +99,9 @@ function ChatContent() {
                   console.error("ChatContent: Error fetching user info:", err);
                   // Handle specific errors based on message
                   if (err.message === 'Authentication failed') {
-                       setError("인증에 실패했습니다. 다시 로그인해주세요.");
+                       setError("Authentication failed. Please log in again.");
                   } else {
-                       setError("사용자 정보를 가져오는 데 실패했습니다. 다시 로그인해주세요.");
+                       setError("Failed to fetch user information. Please log in again.");
                   }
                   localStorage.removeItem('authToken'); // Clear token on fetch failure
                   localStorage.removeItem('userId');   // Clear userId as well
@@ -109,7 +109,7 @@ function ChatContent() {
              });
         } else {
             console.error("ChatContent: No token or userId found.");
-            setError("로그인이 필요합니다.");
+            setError("Login required.");
             router.push('/'); // Redirect to login if no token at all
         }
 
@@ -122,7 +122,7 @@ function ChatContent() {
         // **Guard Clause: Ensure matchId from URL params is valid before proceeding**
         if (!matchId || typeof matchId !== 'string') {
             console.error("ChatContent: Invalid or missing matchId in URL parameters.", matchId);
-            setError("유효하지 않은 채팅방 ID입니다.");
+            setError("Invalid chat room ID.");
             setIsConnected(false); // Ensure connection status is false
             return; // Stop execution if matchId is invalid
         }
@@ -130,7 +130,7 @@ function ChatContent() {
         // Only attempt connection if we have the current user's ID
         if (currentUserId === null) {
              console.log("ChatContent: Waiting for currentUserId before connecting socket.");
-             //setError("사용자 정보 로딩 중..."); // Optionally set a loading state
+             //setError("Loading user information..."); // Optionally set a loading state
              return; // Don't connect yet
         }
 
@@ -138,7 +138,7 @@ function ChatContent() {
         // Getting it here ensures the latest token is used if login happens while component is mounted
         const token = localStorage.getItem('authToken');
         if (!token) {
-             setError("인증 토큰이 없습니다. 로그인이 필요합니다.");
+             setError("Authentication token not found. Login required.");
              router.push('/'); // Redirect to login if no token
              return;
         }
@@ -190,32 +190,32 @@ function ChatContent() {
              // No automatic notification or opponentLeft change on simple disconnect
              if (reason !== 'io client disconnect') {
                  // Only show notification for unexpected disconnects
-                 setNotification('채팅 서버와의 연결이 끊어졌습니다.');
+                 setNotification('Connection to chat server lost.');
              }
         });
 
         newSocket.on('connect_error', (err: Error) => {
              console.error('ChatContent: Socket connection error:', err);
-             let errorMsg = `채팅 서버 연결 오류: ${err.message}`;
+             let errorMsg = `Chat server connection error: ${err.message}`;
               // Provide more specific feedback based on backend error messages
               if (err.message.includes('Authentication error')) {
-                  errorMsg = '인증 오류로 연결에 실패했습니다. 다시 로그인해주세요.';
+                  errorMsg = 'Connection failed due to authentication error. Please log in again.';
                   localStorage.removeItem('authToken');
                   localStorage.removeItem('userId');
                   router.push('/');
               } else if (err.message.includes('User not found')) {
-                   errorMsg = '사용자 정보를 찾을 수 없습니다. 다시 로그인해주세요.';
+                   errorMsg = 'User information not found. Please log in again.';
                     localStorage.removeItem('authToken');
                     localStorage.removeItem('userId');
                     router.push('/');
               } else if (err.message.includes('Invalid token')) {
-                    errorMsg = '토큰이 유효하지 않습니다. 다시 로그인해주세요.';
+                    errorMsg = 'Invalid token. Please log in again.';
                      localStorage.removeItem('authToken');
                      localStorage.removeItem('userId');
                      router.push('/');
               } else if (err.message.includes('만료되었거나 유효하지 않은 채팅방입니다')) {
                     // Handle error from backend if match is inactive on connect
-                    errorMsg = '만료되었거나 유효하지 않은 채팅방입니다.';
+                    errorMsg = 'Expired or invalid chat room.';
               }
              setError(errorMsg);
              setIsConnected(false);
@@ -259,7 +259,7 @@ function ChatContent() {
          // This event is sent when opponent clicks the permanent leave button
          newSocket.on('opponent-left-chat', (data?: { userId?: number }) => {
              console.log(`ChatContent: Opponent left chat permanently (User ID: ${data?.userId || 'Unknown'})`);
-             setNotification('상대방이 채팅방을 나갔습니다. 더 이상 메시지를 보낼 수 없습니다.');
+             setNotification('Opponent has left the chat. You can no longer send messages.');
              setOpponentLeft(true); // Set opponentLeft state to true
              // Consider disconnecting the socket as the chat is effectively over
              // if (socketRef.current) {
@@ -272,7 +272,7 @@ function ChatContent() {
         newSocket.on('error', (errorMessage: string) => {
             console.error('ChatContent: Received error event from socket:', errorMessage);
              // Avoid overwriting critical auth errors with generic chat errors
-             if (!error || !error.includes('로그인') || !error.includes('인증')) {
+             if (!error || !error.includes('Login required') || !error.includes('Authentication')) {
                  setError(errorMessage);
              }
         });
@@ -343,8 +343,8 @@ function ChatContent() {
                    hasSocket: !!socketRef.current
               });
               // Optionally provide user feedback (e.g., brief error message)
-              if (opponentLeft) setError("상대방이 나가 메시지를 보낼 수 없습니다.");
-              else if (!isConnected) setError("연결되지 않아 메시지를 보낼 수 없습니다.");
+              if (opponentLeft) setError("Cannot send message because the opponent has left.");
+              else if (!isConnected) setError("Cannot send message because you are not connected.");
          }
     }, [newMessage, isConnected, opponentLeft, matchId, currentUserId]); // Include opponentLeft in dependencies
 
@@ -373,19 +373,19 @@ function ChatContent() {
     // --- Render Logic ---
      // Display loading or critical error before main UI
      if (!matchId && !error) {
-         return <div className={`flex justify-center items-center h-screen bg-gray-900 text-white ${inter.className}`}>유효한 매치 ID를 로드하는 중...</div>;
+         return <div className={`flex justify-center items-center h-screen bg-gray-900 text-white ${inter.className}`}>Loading valid match ID...</div>;
      }
      // Handle critical errors that prevent chat (auth, user ID fetch issues, invalid match)
-      if (error && (error.includes('로그인이 필요합니다') || error.includes('인증') || error.includes('사용자 정보') || error.includes('만료되었거나 유효하지 않은 채팅방'))) {
+      if (error && (error.includes('Login required') || error.includes('Authentication') || error.includes('User information') || error.includes('Expired or invalid chat room'))) {
            return (
                 <div className={`flex flex-col justify-center items-center h-screen bg-gray-900 text-white ${inter.className}`}>
                     <p className="text-red-500 mb-4 text-center px-4">{error}</p>
-                    <button onClick={() => router.push('/')} className="mt-2 text-amber-400 underline">로그인 페이지로 이동</button>
+                    <button onClick={() => router.push('/')} className="mt-2 text-amber-400 underline">Go to Login Page</button>
                  </div>
             );
        }
        // Display connection/other errors within the chat UI if possible
-       const displayError = error && !error.includes('로그인') && !error.includes('만료') ? error : null; // Filter out critical errors already handled
+       const displayError = error && !error.includes('Login required') && !error.includes('Expired') ? error : null; // Filter out critical errors already handled
 
 
     return (
@@ -403,20 +403,20 @@ function ChatContent() {
                      </div>
                     <h1 className={`text-lg font-semibold truncate ${montserrat.className}`}>
                         {/* Opponent Name */}
-                        상대방
+                        Opponent
                     </h1>
                 </div>
                  {/* Right side: Status and Permanent Leave Button */}
                  <div className="flex items-center">
                     {/* Connection Status Indicator - based on isConnected and opponentLeft */}
                     <span className={`text-xs px-2 py-1 rounded whitespace-nowrap ${isConnected ? (opponentLeft ? 'bg-gray-600 text-gray-200' : 'bg-green-600 text-green-100') : 'bg-red-600 text-red-100'} `}>
-                        {isConnected ? (opponentLeft ? '상대방 나감' : '연결됨') : '연결 끊김'}
+                        {isConnected ? (opponentLeft ? 'Opponent Left' : 'Connected') : 'Disconnected'}
                     </span>
                     {/* Permanent Leave Button */}
                     <button
                         onClick={handleLeaveChat} // Uses force-leave-chat event
                         className="text-slate-400 hover:text-red-500 p-1 rounded-full hover:bg-gray-800 ml-2"
-                        title="채팅방 나가기 (영구)"
+                        title="Leave Chat Room (Permanent)"
                     >
                         <ArrowLeftOnRectangleIcon className="h-6 w-6" />
                     </button>
@@ -434,9 +434,9 @@ function ChatContent() {
             {/* Message List Area */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-black">
                  {/* Display loading indicator for user ID */}
-                 {currentUserId === null && !error && <p className="text-center text-slate-400">사용자 정보 로딩 중...</p>}
+                 {currentUserId === null && !error && <p className="text-center text-slate-400">Loading user information...</p>}
                  {/* Display message if history is empty */}
-                 {currentUserId !== null && messages.length === 0 && !error && <p className="text-center text-slate-500">아직 메시지가 없습니다. 대화를 시작해보세요!</p>}
+                 {currentUserId !== null && messages.length === 0 && !error && <p className="text-center text-slate-500">No messages yet. Start the conversation!</p>}
                 {/* Render messages */}
                 {messages.map((msg, index) => (
                     <div key={`${msg.timestamp}-${index}-${msg.senderId || 'optimistic'}`} className={`flex ${msg.sender === 'me' ? 'justify-end' : 'justify-start'}`}>
@@ -461,9 +461,9 @@ function ChatContent() {
                         value={newMessage}
                         onChange={(e) => setNewMessage(e.target.value)}
                          placeholder={
-                             !isConnected ? (displayError || notification || "연결 중...") :
-                             opponentLeft ? "상대방이 나갔습니다." : // Use opponentLeft
-                             "메시지를 입력하세요..."
+                             !isConnected ? (displayError || notification || "Connecting...") :
+                             opponentLeft ? "Opponent has left." : // Use opponentLeft
+                             "Type a message..."
                          }
                         className={`flex-1 px-4 py-2 bg-gray-800 border border-gray-700 rounded-full focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent text-slate-100 placeholder-slate-400 disabled:opacity-60 disabled:cursor-not-allowed ${inter.className}`}
                         // Disable based on connection AND opponentLeft status AND user ID loading
@@ -489,7 +489,7 @@ export default function ChatPage() {
     return (
         <Suspense fallback={
              <div className={`flex justify-center items-center h-screen bg-gray-900 text-white ${inter.className}`}>
-                 채팅방 로딩 중...
+                 Loading chat room...
              </div>
         }>
             <ChatContent />

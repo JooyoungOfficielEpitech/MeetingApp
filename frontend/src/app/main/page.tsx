@@ -83,7 +83,7 @@ export default function MainPage() {
   };
 
   // --- Dynamic Button Text ---
-   const buttonText = isLoadingMatch ? '상태 확인 중...' : activeMatchId ? '채팅방으로 가기' : '매칭 시작하기';
+   const buttonText = isLoadingMatch ? 'Checking Status...' : activeMatchId ? 'Go to Chat Room' : 'Start Matching';
 
   return (
     <div className={`flex flex-col min-h-screen bg-black text-slate-100 ${inter.className}`}> {/* Black background, Inter font */}
