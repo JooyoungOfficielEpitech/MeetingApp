@@ -46,37 +46,66 @@ function AuthCallbackContent() {
          return res.json(); // Parse successful response
       })
       .then(userInfo => {
-         // --- Store userId --- 
+         // --- Store userId, gender, and status --- 
          if (userInfo && userInfo.id) {
-             localStorage.setItem('userId', userInfo.id.toString()); // Store userId
-             // Store gender as well
+             localStorage.setItem('userId', userInfo.id.toString());
+             // Store gender
              if (userInfo.gender) {
                  localStorage.setItem('userGender', userInfo.gender);
              } else {
                   localStorage.removeItem('userGender');
              }
-             console.log('User info fetched and userId/userGender stored.', userInfo);
-             // Optionally store the whole userInfo if needed elsewhere
-             // localStorage.setItem('userInfo', JSON.stringify(userInfo));
+             // Store status
+             if (userInfo.status) {
+                 localStorage.setItem('userStatus', userInfo.status);
+                 console.log('User status stored:', userInfo.status);
+             } else {
+                 localStorage.removeItem('userStatus'); // Should ideally always exist
+                 console.warn('User status not found in response from /api/profile/me');
+             }
 
-             // Redirect AFTER successfully fetching info and storing userId
-             alert('Login successful! Redirecting to the main page.');
-             router.replace('/main');
+             console.log('User info fetched and stored.', userInfo);
+
+             // --- Redirect based on status --- 
+             if (userInfo.status === 'pending_approval') {
+                 console.log('User status is pending_approval. Redirecting to pending page.');
+                 alert('Your account is pending administrator approval.');
+                 router.replace('/auth/pending-approval'); // Redirect to pending page
+             } else if (userInfo.status === 'active') {
+                 console.log('User status is active. Redirecting to main page.');
+                 alert('Login successful! Redirecting to the main page.');
+                 router.replace('/main'); // Redirect active users to main
+             } else {
+                 // Handle other statuses (rejected, suspended) - maybe redirect to login with message
+                 console.warn(`Unhandled user status: ${userInfo.status}. Redirecting to login.`);
+                 localStorage.removeItem('authToken'); // Clear credentials
+                 localStorage.removeItem('userId');
+                 localStorage.removeItem('userGender');
+                 localStorage.removeItem('userStatus');
+                 alert(`Your account status (${userInfo.status}) prevents login. Please contact support.`);
+                 router.replace('/');
+             }
+             // ---------------------------------
+
          } else {
-              // Handle case where user info or ID is missing in response
-             console.error('User info or ID missing in response from /api/users/me', userInfo);
+              // Handle case where user info or ID is missing
+             console.error('User info or ID missing in response from /api/profile/me', userInfo);
+              // Clean up storage and redirect to login
+              localStorage.removeItem('authToken');
+              localStorage.removeItem('userId');
+              localStorage.removeItem('userGender');
+              localStorage.removeItem('userStatus');
               throw new Error('Login was successful, but user information could not be retrieved.');
          }
-         // -------------------
       })
       .catch(err => {
-         console.error('Failed to fetch user info after callback:', err);
-         localStorage.removeItem('authToken'); // Remove potentially invalid token
-         localStorage.removeItem('userId');   // Clear userId as well
-         localStorage.removeItem('userGender'); // Clear gender as well
-         // localStorage.removeItem('userInfo');
+         console.error('Failed to fetch user info or process status after callback:', err);
+         localStorage.removeItem('authToken');
+         localStorage.removeItem('userId');
+         localStorage.removeItem('userGender');
+         localStorage.removeItem('userStatus');
          alert(`An error occurred during login processing: ${err.message}. Please log in again.`);
-         router.replace('/'); // Redirect to login
+         router.replace('/');
       });
       // ---------------------------------------------------
       

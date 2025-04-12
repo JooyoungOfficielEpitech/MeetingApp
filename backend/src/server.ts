@@ -14,6 +14,8 @@ import jwt from 'jsonwebtoken'; // Import jwt for token generation
 import { Socket } from 'socket.io'; // Import Socket type
 import { authenticateToken } from './middleware/authMiddleware'; // Import authentication middleware
 import { Op } from 'sequelize'; // Import Op for SQL operations
+import bcrypt from 'bcrypt'; // Import bcrypt
+import { Request, Response, NextFunction } from 'express';
 
 // --- Import User model --- 
 const db = require('../models'); // Adjust path if needed
@@ -135,9 +137,9 @@ interface ConnectedUser {
 }
 
 // Map stores all connected users
-const connectedUsers = new Map<string, ConnectedUser>();
+export const connectedUsers = new Map<string, ConnectedUser>();
 // Array stores only FEMALE users actively waiting for a match
-const waitingUsers: ConnectedUser[] = []; 
+export const waitingUsers: ConnectedUser[] = []; 
 // ---------------------------------------------------------------
 
 const io = new SocketIOServer(server, {
@@ -146,6 +148,13 @@ const io = new SocketIOServer(server, {
         methods: ["GET", "POST"]
     }
 });
+
+// --- Middleware to attach io to request --- 
+const attachIo = (req: Request, res: Response, next: NextFunction) => {
+  (req as any).io = io; // Attach io instance to the request object
+  next();
+};
+// ----------------------------------------
 
 // --- Socket.IO Authentication Middleware ---
 io.use(async (socket: Socket, next) => {
@@ -584,6 +593,47 @@ io.on('connection', (socket: any) => {
 });
 // ----------------------------------
 
+// --- Ensure Admin User Function --- 
+const ensureAdminUser = async () => {
+  const ADMIN_EMAIL = 'root@root.com';
+  const ADMIN_PASSWORD = 'alpine'; // Store password securely in real app (e.g., env vars)
+
+  try {
+    const existingAdmin = await User.findOne({ where: { email: ADMIN_EMAIL } });
+
+    if (!existingAdmin) {
+      console.log(`Admin user (${ADMIN_EMAIL}) not found. Creating...`);
+      const saltRounds = 10;
+      const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, saltRounds);
+
+      await User.create({
+        email: ADMIN_EMAIL,
+        passwordHash: passwordHash,
+        name: 'Root Admin', // Provide a default name
+        gender: 'other',   // Provide a default gender or make nullable in model
+        isAdmin: true,     // Set as admin
+        // Add defaults for other required fields if necessary
+        occupation: 'Admin' // Example default
+      });
+      console.log(`Admin user (${ADMIN_EMAIL}) created successfully.`);
+
+    } else {
+        // Optionally ensure the existing user is marked as admin
+        if (!existingAdmin.isAdmin) {
+            console.log(`Existing user (${ADMIN_EMAIL}) found but is not admin. Updating...`);
+            existingAdmin.isAdmin = true;
+            await existingAdmin.save();
+            console.log(`Admin user (${ADMIN_EMAIL}) updated to admin.`);
+        } else {
+             console.log(`Admin user (${ADMIN_EMAIL}) already exists.`);
+        }
+    }
+  } catch (error) {
+    console.error('Error ensuring admin user:', error);
+  }
+};
+// --------------------------------
+
 // Swagger definition
 const swaggerOptions = {
     definition: {
@@ -613,11 +663,15 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 // Middleware to parse JSON bodies
 app.use(express.json());
 
+// Apply io attachment middleware BEFORE the admin routes
+app.use('/api/admin', attachIo);
+
 // Import and use routes
 import authRoutes from './routes/auth';
 import profileRoutes from './routes/profile';
 import matchesRouter from './routes/matches';
 import mainRoutes from './routes/main'; // Import the new main routes
+import adminRoutes from './routes/admin'; // Import the new admin routes
 
 // --- Google Auth Routes (Callback Updated with Custom Handler) --- 
 // 1. Route to start Google authentication
@@ -656,9 +710,13 @@ app.get('/api/auth/google/callback',
 
         if (isProfileComplete) {
           // Profile is complete, generate token and redirect to main app area via auth callback page
-          const payload = { userId: user.id, email: user.email }; 
+          const payload = { 
+              userId: user.id, 
+              email: user.email,
+              status: user.status // Include status here as well
+          }; 
           const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
-          console.log('Profile complete. Redirecting to /auth/callback');
+          console.log('Profile complete. Redirecting to /auth/callback with token containing status:', payload.status);
           return res.redirect(`http://localhost:3000/auth/callback?token=${token}`); // Standard login flow
         } else {
           // Profile is incomplete, redirect to complete profile page (use session, no token needed)
@@ -711,6 +769,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/profile', profileRoutes); // Applied authenticateToken within the router file for profile
 app.use('/api/matches', matchesRouter); // Applied authenticateToken within the router file for matches
 app.use('/api/main', mainRoutes);      // Applied authenticateToken within the router file for main
+app.use('/api/admin', adminRoutes);      // Admin routes now have req.io available
 
 const PORT = process.env.PORT || 3001; // Use a different port than frontend
 
@@ -762,7 +821,16 @@ app.get('/hello', (req, res) => {
     res.json({ message: 'Hello from the backend!' });
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => { // Make the callback async
     console.log(`Server listening on *:${PORT}`);
-    console.log(`Swagger UI available at http://localhost:${PORT}/api-docs`); // Log Swagger URL
+    console.log(`Swagger UI available at http://localhost:${PORT}/api-docs`);
+
+    // Ensure the database is connected and then ensure the admin user exists
+    try {
+        await db.sequelize.authenticate(); // Verify DB connection
+        console.log('Database connection established successfully.');
+        await ensureAdminUser(); // Call the function to check/create admin user
+    } catch (error) {
+        console.error('Unable to connect to the database or ensure admin user:', error);
+    }
 }); 

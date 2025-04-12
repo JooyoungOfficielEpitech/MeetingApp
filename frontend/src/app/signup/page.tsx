@@ -64,25 +64,24 @@ export default function SignupPage() {
 
             console.log('Signup successful:', responseData);
 
-            // --- Store token and user info ---
-            if (responseData.token && responseData.user && responseData.user.id && responseData.user.gender) {
+            // --- Store token and user status --- 
+            if (responseData.token && responseData.user && responseData.user.status) {
                 localStorage.setItem('authToken', responseData.token);
-                localStorage.setItem('userId', responseData.user.id.toString());
-                localStorage.setItem('userGender', responseData.user.gender);
-                console.log('Token, userId, and userGender saved to localStorage.');
+                localStorage.setItem('userStatus', responseData.user.status);
+                // Optionally store userId and gender if needed immediately
+                if (responseData.user.id) localStorage.setItem('userId', responseData.user.id.toString());
+                if (responseData.user.gender) localStorage.setItem('userGender', responseData.user.gender);
+                
+                console.log('Token and status saved to localStorage.');
 
-                alert('Signup complete! Please fill in your profile information.');
-                router.push('/profile'); // Redirect to profile page
+                // --- Redirect to Pending Approval page --- 
+                alert(responseData.message || 'Signup successful. Please wait for administrator approval.');
+                router.push('/auth/pending-approval'); 
+                // -------------------------------------------
             } else {
-                 // Handle case where token or user data (especially ID) is missing
-                 console.error('Signup success response missing token, user id or gender.', responseData);
-                 setError('Signup successful, but user information processing failed. Please log in again.');
-                 // Optionally clear storage and redirect to login
-                 // localStorage.removeItem('authToken');
-                 // localStorage.removeItem('userId');
-                 // router.push('/');
+                console.error('Signup response missing token or user status.', responseData);
+                setError('Signup completed, but failed to initialize session. Please try logging in.');
             }
-            // ---------------------------------
 
         } catch (err: any) {
             console.error('Signup Error:', err);

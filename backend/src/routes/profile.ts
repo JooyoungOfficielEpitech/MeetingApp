@@ -36,39 +36,47 @@ const router = express.Router();
  *       500:
  *         description: Server error
  */
-router.get('/me', authenticateToken, (async (req: Request, res: Response, next: NextFunction) => {
-    console.log('[/api/profile/me GET] Received request. req.user:', (req as any).user);
-    try {
-        const userId = (req as any).user?.userId;
-        console.log(`Extracted userId: ${userId}, Type: ${typeof userId}`);
+router.get('/me', authenticateToken, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const userId = (req as any).user?.userId;
+    console.log(`[GET /api/profile/me] Request for user ID: ${userId}`);
 
-        if (userId === undefined || userId === null || typeof userId !== 'number') {
-             console.error('Unauthorized: User ID not found or invalid in req.user');
-             return res.status(401).json({ message: 'Unauthorized: User ID not found or invalid in token' });
-        }
-        
-        console.log(`Attempting to find user by PK: ${userId}`);
+    if (!userId) {
+        res.status(401).json({ message: 'User ID not found in token' });
+        return; // Return void
+    }
+
+    try {
         const user = await User.findByPk(userId, {
-            attributes: { exclude: ['passwordHash'] }
+            attributes: [
+                'id',
+                'email',
+                'name',
+                'gender',
+                'dob',
+                'age',
+                'height',
+                'mbti',
+                'occupation',
+                'profilePictureUrl',
+                'status' // Include the status field
+                // Exclude passwordHash, googleId, etc.
+            ]
         });
 
         if (!user) {
-            console.log(`User not found for ID: ${userId}`);
-            return res.status(404).json({ message: 'User not found' });
+            res.status(404).json({ message: 'User not found' });
+            return; // Return void
         }
         
-        console.log(`User found for ID: ${userId}, sending profile.`);
-        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-        res.setHeader('Pragma', 'no-cache');
-        res.setHeader('Expires', '0');
-        res.setHeader('Surrogate-Control', 'no-store');
-        return res.json(user);
+        console.log('[GET /api/profile/me] Found user:', user.toJSON()); // Log found user
+        res.status(200).json(user);
+        // No explicit return needed
 
     } catch (error) {
-        console.error('Error fetching user profile:', error);
-        next(error);
+        console.error(`[GET /api/profile/me] Error fetching profile for user ${userId}:`, error);
+        next(error); // Pass to global error handler
     }
-}) as RequestHandler);
+});
 
 /**
  * @swagger

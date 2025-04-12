@@ -108,51 +108,53 @@ router.post('/signup',
                 passwordHash,
                 name,
                 gender,
-                occupation: false // Explicitly set occupation to false on signup
+                occupation: false, // Explicitly set occupation to false on signup
+                status: 'pending_approval', // Explicitly set status
                 // Add default/null values for other User model fields if necessary
                 // dob: null, age: null, etc. based on your model definition
             });
-            console.log('New user created:', newUser.toJSON());
+            console.log('New user created (signup):', newUser.toJSON());
 
-            // --- Add male user to waitlist --- 
+            // --- Add male user to waitlist (Keep this logic) --- 
             if (newUser.gender === 'male') {
                 try {
                     await MatchingWaitList.create({ userId: newUser.id });
                     console.log(`Male user ${newUser.id} added to MatchingWaitList.`);
                 } catch (waitlistError: any) {
-                    // Handle potential errors like unique constraint violation if logic somehow adds twice
                     if (waitlistError.name === 'SequelizeUniqueConstraintError') {
                         console.warn(`User ${newUser.id} already in MatchingWaitList (signup).`);
                     } else {
                         console.error(`Error adding user ${newUser.id} to MatchingWaitList:`, waitlistError);
-                        // Decide if signup should fail. For now, log and continue.
                     }
                 }
             }
             // ------------------------------------
 
-            // --- Generate JWT for the new user --- 
-            const payload = { userId: newUser.id, email: newUser.email };
-            console.log('Generating JWT for new user with payload:', payload); // Log payload
-            const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
-            // --------------------------------------
-
-            // --- Prepare user response object (exclude sensitive info) ---
-             const userResponse = { 
+            // --- Generate JWT for the new pending user --- 
+            const payload = { 
+                userId: newUser.id, 
+                email: newUser.email,
+                status: newUser.status // Should be 'pending_approval' from create
+            };
+            console.log('Generating JWT for new pending user with payload:', payload); 
+            const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' }); // Use a reasonable expiration
+            // ---------------------------------------------
+            
+            // --- Prepare limited user response (optional, but consistent) ---
+            const userResponse = { 
                  id: newUser.id,
                  email: newUser.email,
                  name: newUser.name,
                  gender: newUser.gender,
-                 // Add other relevant fields like age: newUser.age, height: newUser.height etc. if needed immediately
+                 status: newUser.status
              };
-            // ---------------------------------------------------------
+            // ------------------------------------------------------------
 
             // Respond with success message, token, and user info
-            // Respond
             res.status(201).json({ 
-                message: 'User registered successfully',
-                token: token, // Include the generated token
-                user: userResponse // Include user details 
+                message: 'Signup successful. Please wait for administrator approval.', // Keep message
+                token: token,       // Return the token
+                user: userResponse  // Return basic user info
             });
 
         } catch (error) {
@@ -249,6 +251,23 @@ router.post('/login',
                 return;
             }
 
+            // --- Check User Status --- 
+            if (user.status === 'pending_approval') {
+                console.warn(`Login attempt failed: User ${user.id} is pending approval.`);
+                res.status(403).json({ message: 'Your account is pending administrator approval.' });
+                return;
+            } else if (user.status === 'rejected' || user.status === 'suspended') { // Handle rejected/suspended
+                 console.warn(`Login attempt failed: User ${user.id} status is ${user.status}.`);
+                 res.status(403).json({ message: `Your account access has been restricted (${user.status}). Please contact support.` });
+                 return;
+            } else if (user.status !== 'active') {
+                 // Catch any other unexpected statuses
+                 console.error(`Login attempt failed: User ${user.id} has unexpected status ${user.status}.`);
+                 res.status(500).json({ message: 'An unexpected error occurred with your account status.' });
+                 return;
+            }
+            // --- User is active, proceed with login --- 
+
             // --- Add male user to waitlist if not occupied --- 
             if (user.gender === 'male' && user.occupation === false) {
                 try {
@@ -290,9 +309,13 @@ router.post('/login',
             }
             // -------------------------------------------
 
-            // Generate JWT
-            const payload = { userId: user.id, email: user.email };
-            console.log('Generating JWT for logged in user with payload:', payload); // Log payload
+            // --- Login Successful --- 
+            const payload = { 
+                userId: user.id, 
+                email: user.email,
+                status: user.status // Include user status in JWT payload
+            };
+            console.log('JWT Payload:', payload); // Log the payload
             const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
 
             // Respond with token, user info, and active match ID (if found)
@@ -437,6 +460,8 @@ router.post('/social/complete',
                 height,   
                 gender,   
                 mbti,     
+                occupation: false, // Explicitly set occupation to false
+                status: 'pending_approval' // Explicitly set status
             });
             console.log('New user created via social completion:', newUser.toJSON());
 
@@ -445,7 +470,12 @@ router.post('/social/complete',
                  if (err) {
                     console.error("Session save error after completing profile:", err);
                  }
-                 const payload = { userId: newUser.id, email: newUser.email };
+                 // Generate JWT for the new user
+                 const payload = { 
+                     userId: newUser.id, 
+                     email: newUser.email,
+                     status: 'active' // User created via this route is implicitly active (already approved implicitly)
+                 };
                  const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
                  res.status(201).json({ token, user: { id: newUser.id, email: newUser.email, name: newUser.name } }); 
             });
@@ -500,6 +530,7 @@ const completeSocialProfileHandler: RequestHandler = async (req: Request, res: R
             name: name, 
             gender: gender, 
             occupation: false, // Explicitly set occupation to false
+            status: 'pending_approval' // Explicitly set status
         });
         console.log('New user created from social profile:', newUser.toJSON());
 
@@ -520,7 +551,12 @@ const completeSocialProfileHandler: RequestHandler = async (req: Request, res: R
         // @ts-ignore
         delete req.session.pendingSocialProfile;
 
-        const payload = { userId: newUser.id, email: newUser.email };
+        // Generate JWT for the new user
+        const payload = { 
+            userId: newUser.id, 
+            email: newUser.email,
+            status: 'active' // User created via this route is implicitly active (already approved implicitly)
+        };
         const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
 
          const userResponse = { 

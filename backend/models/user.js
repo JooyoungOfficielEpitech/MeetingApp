@@ -11,6 +11,16 @@ module.exports = (sequelize, DataTypes) => {
      */
     static associate(models) {
       // define association here
+      // User has many Matches (as User1)
+      User.hasMany(models.Match, {
+        foreignKey: 'user1Id',
+        as: 'MatchesAsUser1' // Define an alias for this association
+      });
+      // User has many Matches (as User2)
+      User.hasMany(models.Match, {
+        foreignKey: 'user2Id',
+        as: 'MatchesAsUser2' // Define an alias for this association
+      });
     }
   }
   User.init({
@@ -53,6 +63,19 @@ module.exports = (sequelize, DataTypes) => {
     occupation: DataTypes.STRING,
     income: DataTypes.STRING,
     profilePictureUrl: DataTypes.STRING,
+    isAdmin: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+    status: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: 'pending_approval',
+      validate: {
+        isIn: [['pending_approval', 'active', 'rejected', 'suspended']]
+      }
+    },
     deletedAt: {
       type: DataTypes.DATE,
       allowNull: true,
