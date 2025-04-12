@@ -151,48 +151,69 @@ const io = new SocketIOServer(server, {
 io.use(async (socket: Socket, next) => {
     console.log(`[AuthMiddleware] Connection attempt by Socket ID: ${socket.id}`);
     const token = socket.handshake.auth.token;
+    const matchIdFromAuth = socket.handshake.auth.matchId; // Get matchId from client auth
+
+    console.log(`[AuthMiddleware] Received Auth - Token: ${!!token}, MatchID: ${matchIdFromAuth || 'N/A'}`);
 
     if (!token) {
         console.error("[AuthMiddleware] Socket connection error: No token provided.");
         return next(new Error('Authentication error: No token provided'));
     }
+
     try {
-        // Verify the token first
+        // 1. Verify the JWT token
         const decoded = jwt.verify(token, JWT_SECRET) as { userId: number; email: string };
         const userIdFromToken = decoded.userId;
         console.log("[AuthMiddleware] Token verified for user ID:", userIdFromToken);
 
+        // 2. Check if matchId was provided (required for chat rooms, optional for main page)
+        if (matchIdFromAuth) {
+            console.log(`[AuthMiddleware] Verifying participation for user ${userIdFromToken} in match ${matchIdFromAuth}...`);
+            // 3. Fetch the match details from DB
+            const match = await Match.findOne({ where: { matchId: matchIdFromAuth } });
+
+            // 4. Validate match existence, participation, and active status
+            if (!match) {
+                console.error(`[AuthMiddleware] Unauthorized: Match not found (${matchIdFromAuth})`);
+                return next(new Error('Unauthorized: Invalid chat room'));
+            }
+            if (match.user1Id !== userIdFromToken && match.user2Id !== userIdFromToken) {
+                console.error(`[AuthMiddleware] Unauthorized: User ${userIdFromToken} is not a participant of match ${matchIdFromAuth}`);
+                return next(new Error('Unauthorized: Not a participant of this chat room'));
+            }
+            if (!match.isActive) {
+                console.warn(`[AuthMiddleware] Connection denied: Match ${matchIdFromAuth} is inactive.`);
+                return next(new Error('Unauthorized: This chat room is no longer active'));
+            }
+            console.log(`[AuthMiddleware] User ${userIdFromToken} verified as active participant of match ${matchIdFromAuth}.`);
+        } else {
+             // If no matchId is provided, it might be the main page connection. Allow for now.
+             console.log('[AuthMiddleware] No matchId provided, assuming main page connection.');
+        }
+
+        // 5. Fetch user status (gender, occupation) - Keep existing logic for this
         let userGender: Gender | null = null;
         let isOccupied: boolean = false;
-        let userFoundInDb = false;
-
-        // Attempt to fetch current user status from DB
         try {
             const user = await User.findByPk(userIdFromToken, { attributes: ['id', 'gender', 'occupation'] });
             if (user) {
-                userFoundInDb = true;
                 userGender = (user.gender && ['male', 'female', 'other'].includes(user.gender)) ? user.gender as Gender : null;
                 isOccupied = user.occupation === true;
-                console.log(`[AuthMiddleware] User ${userIdFromToken} found in DB. Gender: ${userGender}, Occupation: ${isOccupied}`);
+                console.log(`[AuthMiddleware] User ${userIdFromToken} status - Gender: ${userGender}, Occupation: ${isOccupied}`);
             } else {
-                // User not found in DB - might be a timing issue after signup
-                console.warn(`[AuthMiddleware] User ${userIdFromToken} NOT found in DB (possibly right after signup). Proceeding with default status.`);
-                // Keep default gender (null) and isOccupied (false)
+                console.warn(`[AuthMiddleware] User ${userIdFromToken} NOT found in DB when fetching status (after token/match verification).`);
             }
         } catch (dbError: any) {
-            // Handle DB errors other than "not found"
-            console.error(`[AuthMiddleware] DB error fetching user ${userIdFromToken}:`, dbError);
-            // Optionally, reject connection on DB error?
-            // return next(new Error('Database error during authentication'));
-            // For now, proceed with default status but log the error.
-            console.warn(`[AuthMiddleware] Proceeding with default status for user ${userIdFromToken} due to DB error.`);
+            console.error(`[AuthMiddleware] DB error fetching user ${userIdFromToken} status:`, dbError);
+            // Allow connection even if status fetch fails? Or reject?
+            // For now, allow but status might be inaccurate.
         }
 
-        // Store user info on the socket - always use userId from token, use DB status if found
+        // 6. Store user info on the socket
         (socket as any).user = { userId: userIdFromToken, gender: userGender, isOccupied: isOccupied }; 
         console.log(`[AuthMiddleware] Stored user info on socket:`, (socket as any).user);
 
-        next(); // Allow connection
+        next(); // Allow connection if all checks passed
 
     } catch (jwtError: any) {
         // Handle JWT verification errors (invalid token, expired)

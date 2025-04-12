@@ -16,18 +16,23 @@ interface ButtonState {
     matchId: string | null;
 }
 
+interface MatchSuccessData { matchId: string; opponentId: number; }
+
 export default function MainPage() {
-  // Removed filterValue state
   const router = useRouter();
-  const socketRef = useRef<Socket | null>(null); // Ref for the temporary socket
-  console.log("MainPage: Component rendering"); // Add this log
+  // Rename existing socketRef for temporary matching socket
+  const tempSocketRef = useRef<Socket | null>(null); 
+  // Add a new ref for the persistent main page socket
+  const mainSocketRef = useRef<Socket | null>(null);
+  console.log("MainPage: Component rendering");
 
   // --- State for Button --- 
-  const [buttonState, setButtonState] = useState<ButtonState | null>(null); // Store the whole state object
+  const [buttonState, setButtonState] = useState<ButtonState | null>(null);
   const [isLoadingButtonState, setIsLoadingButtonState] = useState(true);
   const [isAttemptingMatch, setIsAttemptingMatch] = useState(false);
-  // --- Keep activeMatchId separate for potential other uses, but sync it --- 
   const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
+  // Add state for main socket connection status
+  const [isMainSocketConnected, setIsMainSocketConnected] = useState(false);
 
   // Mock data
   const activeUsers = 127;
@@ -84,6 +89,74 @@ export default function MainPage() {
     };
   }, [router]); // Dependency array, re-run if router changes (might not be needed)
 
+  // --- Persistent Main Socket Connection --- 
+  useEffect(() => {
+    const token = localStorage.getItem('authToken');
+    if (!token) {
+        console.log("MainPage: No token, cannot establish main socket connection.");
+        return; // Don't connect if no token
+    }
+
+    // Disconnect existing main socket if it exists (e.g., HMR)
+    if (mainSocketRef.current) {
+        mainSocketRef.current.disconnect();
+    }
+
+    console.log("MainPage: Establishing persistent main socket connection...");
+    const socket = io('http://localhost:3001', { 
+        auth: { token },
+        // No matchId needed here, just general connection
+        // Consider adding reconnection options if needed
+    });
+    mainSocketRef.current = socket;
+
+    socket.on('connect', () => {
+        console.log('MainPage: Main socket connected. ID:', socket.id);
+        setIsMainSocketConnected(true);
+    });
+
+    socket.on('disconnect', (reason: string) => {
+        console.log('MainPage: Main socket disconnected. Reason:', reason);
+        setIsMainSocketConnected(false);
+    });
+
+    socket.on('connect_error', (err: Error) => {
+        console.error('MainPage: Main socket connection error:', err.message);
+        setIsMainSocketConnected(false);
+         // Handle auth errors specifically if needed
+         if (err.message.includes('Authentication error')) {
+             // Maybe force logout or show login required state?
+             setButtonState({ button_display: 'Login Required', active: false, matchId: null });
+         }
+    });
+
+    // --- Listen for match success event (Real-time update for matched user) ---
+    socket.on('match-success', (data: MatchSuccessData) => {
+        console.log(`MainPage: Received 'match-success' via main socket! Match ID: ${data.matchId}`);
+        // Update button state immediately without calling API
+        setButtonState({
+            button_display: 'Go to Chat Room',
+            active: true,
+            matchId: data.matchId
+        });
+        setActiveMatchId(data.matchId);
+        // Optional: Alert the user they have been matched
+        // alert('You have been matched! Click \'Go to Chat Room\'.');
+    });
+    // ----------------------------------------------------------------------
+
+    // TODO: Add listener for 'match-terminated' event (Phase 3)
+    // socket.on('match-terminated', () => { ... fetchButtonState() ... });
+
+    // Cleanup on component unmount
+    return () => {
+        console.log("MainPage: Unmounting, disconnecting main socket.");
+        socket.disconnect();
+        mainSocketRef.current = null;
+        setIsMainSocketConnected(false);
+    };
+  }, []); // Run only once on mount
+
   const handleMatchClick = () => {
     // Prevent action if button state is loading or we are already attempting match
     if (isLoadingButtonState || isAttemptingMatch || !buttonState) return;
@@ -116,18 +189,16 @@ export default function MainPage() {
             return;
         }
 
-        // Disconnect previous temporary socket if exists
-        if (socketRef.current) {
-            socketRef.current.disconnect();
-            socketRef.current = null;
+        // Use tempSocketRef for the temporary connection
+        if (tempSocketRef.current) {
+            tempSocketRef.current.disconnect();
+            tempSocketRef.current = null;
         }
-
-        // Create a new temporary socket connection for matching attempt
         const tempSocket = io('http://localhost:3001', { 
             auth: { token },
             forceNew: true 
         });
-        socketRef.current = tempSocket;
+        tempSocketRef.current = tempSocket;
 
         tempSocket.on('connect', () => {
             console.log('MainPage: Temporary socket connected for matching attempt. ID:', tempSocket.id);
@@ -138,7 +209,7 @@ export default function MainPage() {
             console.log('MainPage: Match success received!', data);
             alert('Match found! Connecting to chat room...');
             setIsAttemptingMatch(false);
-            socketRef.current = null; 
+            tempSocketRef.current = null; 
             router.push(`/chat/${data.matchId}`);
         });
 
@@ -146,7 +217,7 @@ export default function MainPage() {
             console.log('MainPage: No opponent available.', message);
             alert(message || 'No available users found. Please try again later.');
             setIsAttemptingMatch(false);
-            socketRef.current = null;
+            tempSocketRef.current = null;
             // Re-fetch button state as we are no longer attempting match
             // fetchButtonState(); // Consider calling the fetch function again here or directly setting state
             setButtonState({ button_display: 'Start Matching', active: true, matchId: null }); // Assuming female user
@@ -156,7 +227,7 @@ export default function MainPage() {
             console.error('MainPage: Matching error received:', errorMessage);
             alert(`Matching failed: ${errorMessage || 'Unknown error'}`);
             setIsAttemptingMatch(false);
-            socketRef.current = null;
+            tempSocketRef.current = null;
             // Re-fetch button state on error
             // fetchButtonState(); 
             setButtonState({ button_display: 'Start Matching', active: true, matchId: null }); // Assuming female user
@@ -166,7 +237,7 @@ export default function MainPage() {
             console.error('MainPage: Temporary socket connection error:', err.message);
             alert(`Failed to connect to matching server: ${err.message}`);
             setIsAttemptingMatch(false);
-            socketRef.current = null;
+            tempSocketRef.current = null;
              // Re-fetch button state on connection error
             // fetchButtonState(); 
             setButtonState({ button_display: 'Start Matching', active: true, matchId: null }); // Assuming female user
@@ -179,7 +250,7 @@ export default function MainPage() {
                // Optionally re-fetch state if disconnect was unexpected during attempt
                // fetchButtonState();
             }
-            socketRef.current = null; 
+            tempSocketRef.current = null; 
         });
     } else {
         console.warn(`handleMatchClick called with unknown button display text: ${buttonState.button_display}`);
