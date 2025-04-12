@@ -18,11 +18,11 @@ export default function CompleteProfilePage() {
     // State for pre-filled data from session
     const [email, setEmail] = useState('');
     const [name, setName] = useState('');
+    const [gender, setGender] = useState('');
 
     // State for user inputs
     const [age, setAge] = useState('');
     const [height, setHeight] = useState('');
-    const [gender, setGender] = useState<'male' | 'female' | 'other' | ''>('');
     const [mbti, setMbti] = useState('');
 
     useEffect(() => {
@@ -47,6 +47,7 @@ export default function CompleteProfilePage() {
                 const data = await response.json();
                 setEmail(data.email || '');
                 setName(data.name || '');
+                setGender(data.gender || '');
             } catch (err: any) {
                 console.error("Failed to fetch profile data:", err);
                 setError(err.message || '프로필 정보 로딩 중 오류 발생');
@@ -65,56 +66,44 @@ export default function CompleteProfilePage() {
         setIsLoading(true);
         setError(null);
 
-        // Basic client-side validation (optional, backend validates too)
-        if (!age || !height || !gender || !mbti) {
-            setError('모든 필드를 입력해주세요.');
+        if (!name || !gender) {
+            setError('Please fill in all fields.');
             setIsLoading(false);
             return;
         }
 
-        console.log('Submitting additional profile info:', { age, height, gender, mbti });
+        console.log('Submitting profile completion:', { name, gender });
 
         try {
-            const response = await fetch('http://localhost:3001/api/auth/social/complete', {
+            const response = await fetch('http://localhost:3001/api/auth/complete-social', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                // Use credentials: 'include' to send session cookies
+                body: JSON.stringify({ name, gender }),
                 credentials: 'include',
-                body: JSON.stringify({ 
-                    age: parseInt(age, 10), // Ensure numbers are sent as numbers
-                    height: parseInt(height, 10),
-                    gender,
-                    mbti: mbti.toUpperCase() // Ensure consistent casing if needed
-                }),
             });
 
-            const responseData = await response.json();
+            const data = await response.json();
+            console.log('Response from /complete-social:', data);
 
-            if (!response.ok) {
-                let errorMessage = responseData.message || '프로필 완료 중 오류 발생';
-                if (responseData.errors && Array.isArray(responseData.errors)) {
-                   errorMessage = responseData.errors.map((err: any) => err.msg || '유효성 검사 오류').join(', ');
+            if (response.ok && data.token) {
+                localStorage.setItem('authToken', data.token);
+                if (data.user && data.user.id) {
+                    localStorage.setItem('userId', data.user.id.toString());
                 }
-                throw new Error(errorMessage);
-            }
-
-            // Signup successful, token received
-            console.log('Profile completion successful:', responseData);
-            if (responseData.token) {
-                localStorage.setItem('authToken', responseData.token);
-                // Optionally store user info too
-                // localStorage.setItem('userInfo', JSON.stringify(responseData.user));
-                alert('회원가입 및 로그인이 완료되었습니다!');
-                router.replace('/main'); // Redirect to main page
+                if (data.user && data.user.gender) {
+                    localStorage.setItem('userGender', data.user.gender);
+                }
+                console.log('Profile completed successfully. Token and user info stored.');
+                alert('Profile completed! Redirecting to the main page.');
+                router.replace('/main');
             } else {
-                throw new Error('토큰이 수신되지 않았습니다.');
+                setError(data.message || `An error occurred: ${response.statusText}`);
             }
-
         } catch (err: any) {
-            console.error('Profile completion error:', err);
-            setError(err.message || '프로필 완료 중 오류가 발생했습니다.');
+            console.error('Failed to complete profile:', err);
+            setError(err.message || 'An unexpected error occurred. Please try again.');
         } finally {
             setIsLoading(false);
         }
@@ -210,7 +199,7 @@ export default function CompleteProfilePage() {
                                 required
                                 className={`${selectBaseStyle} appearance-none`}
                                 value={gender}
-                                onChange={(e) => setGender(e.target.value as 'male' | 'female' | 'other' | '')}
+                                onChange={(e) => setGender(e.target.value)}
                             >
                                 <option value="" disabled>Select Gender</option>
                                 <option value="male">Male</option>
@@ -256,7 +245,7 @@ export default function CompleteProfilePage() {
                             disabled={isLoading}
                              className={`${buttonBaseStyle} bg-amber-500 hover:bg-amber-600 text-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-800 focus:ring-amber-500 ${montserrat.className} font-semibold ${isLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
                         >
-                            {isLoading ? 'Saving...' : 'Complete Signup & Start'}
+                            {isLoading ? 'Saving...' : 'Complete Profile'}
                         </button>
                     </div>
                 </form>

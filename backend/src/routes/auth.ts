@@ -461,4 +461,91 @@ router.post('/social/complete',
     }) as RequestHandler
 );
 
+// Define the handler function separately with RequestHandler type and explicit Promise<void> return type
+const completeSocialProfileHandler: RequestHandler = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    console.log('[/api/auth/complete-social POST] Received request.');
+    // @ts-ignore 
+    const pendingProfile = req.session?.pendingSocialProfile;
+    const { name, gender /* other fields */ } = req.body;
+    
+    console.log('Session pendingProfile:', pendingProfile);
+    console.log('Request body:', req.body);
+
+    if (!pendingProfile || !pendingProfile.id || !pendingProfile.provider || !pendingProfile.email) {
+         console.error('Invalid or missing pending social profile in session.');
+         // @ts-ignore
+         delete req.session.pendingSocialProfile;
+         res.status(400).json({ message: 'Session expired or invalid. Please try social login again.' }); // Remove return
+         return; // Explicitly return void
+    }
+
+    try {
+        const existingUser = await User.findOne({ 
+            where: { 
+                email: pendingProfile.email,
+                googleId: { [Op.is]: null } 
+            }
+        });
+        if (existingUser) {
+            console.warn(`Email ${pendingProfile.email} already exists for a local account.`);
+             // @ts-ignore
+             delete req.session.pendingSocialProfile;
+             res.status(409).json({ message: 'This email is already registered. Please log in using your password.'}); // Remove return
+             return; // Explicitly return void
+        }
+
+        const newUser = await User.create({
+            googleId: pendingProfile.id,
+            email: pendingProfile.email,
+            name: name, 
+            gender: gender, 
+            occupation: false, // Explicitly set occupation to false
+        });
+        console.log('New user created from social profile:', newUser.toJSON());
+
+         if (newUser.gender === 'male') {
+             try {
+                 await MatchingWaitList.create({ userId: newUser.id });
+                 console.log(`Male user ${newUser.id} added to MatchingWaitList (social signup).`);
+             } catch (waitlistError: any) {
+                 if (waitlistError.name === 'SequelizeUniqueConstraintError') {
+                     console.warn(`User ${newUser.id} already in MatchingWaitList (social signup).`);
+                 } else {
+                     console.error(`Error adding user ${newUser.id} to MatchingWaitList:`, waitlistError);
+                     // Decide if this error should prevent login or just be logged
+                 }
+             }
+         }
+
+        // @ts-ignore
+        delete req.session.pendingSocialProfile;
+
+        const payload = { userId: newUser.id, email: newUser.email };
+        const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
+
+         const userResponse = { 
+             id: newUser.id,
+             email: newUser.email,
+             name: newUser.name,
+             gender: newUser.gender,
+         };
+
+        res.status(200).json({ token, user: userResponse }); 
+        // No return needed here, implicitly returns void
+
+    } catch (error) {
+        console.error('Error completing social profile:', error);
+        // @ts-ignore
+        delete req.session.pendingSocialProfile;
+        next(error); // Pass error to middleware, which implicitly returns void
+    }
+};
+
+// Apply validation middleware first, then the handler
+router.post('/complete-social', 
+    body('name').trim().notEmpty().withMessage('Name is required'),
+    body('gender').isIn(['male', 'female', 'other']).withMessage('Invalid gender value'),
+    completeSocialProfileHandler // Apply the separated handler
+);
+
 export default router; 

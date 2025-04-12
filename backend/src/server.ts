@@ -654,22 +654,34 @@ app.get('/api/auth/google/callback',
         // Check if essential profile info (e.g., gender) is missing
         const isProfileComplete = user.gender && ['male', 'female', 'other'].includes(user.gender); // Add other checks if needed (age, height etc.)
 
-        // Generate JWT regardless
-        const payload = { userId: user.id, email: user.email }; 
-        const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
-
         if (isProfileComplete) {
-          // Profile is complete, redirect to main app area via auth callback page
+          // Profile is complete, generate token and redirect to main app area via auth callback page
+          const payload = { userId: user.id, email: user.email }; 
+          const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
           console.log('Profile complete. Redirecting to /auth/callback');
           return res.redirect(`http://localhost:3000/auth/callback?token=${token}`); // Standard login flow
         } else {
-          // Profile is incomplete, redirect to profile edit page with token
-          console.log('Profile incomplete. Redirecting to /profile for editing.');
-          // We send the token here so the profile page can use it for auth immediately
-          return res.redirect(`http://localhost:3000/profile?token=${token}`);
+          // Profile is incomplete, redirect to complete profile page (use session, no token needed)
+          console.log('Profile incomplete. Redirecting to /signup/complete-profile for completion.');
+          // Store necessary info in session if not already there (e.g., if strategy didn't handle this case)
+          // For consistency, ensure pendingSocialProfile is set even for existing users needing completion
+          req.session.pendingSocialProfile = {
+            provider: 'google', // or user.provider if available
+            id: user.googleId, // Assuming googleId field exists
+            email: user.email,
+            name: user.name, // Include existing name if available
+          };
+          // Save session before redirecting
+          req.session.save((err: any) => {
+              if (err) {
+                  console.error("Session save error before redirecting incomplete existing user:", err);
+                  // Handle error appropriately, maybe redirect to an error page
+                  return res.redirect('http://localhost:3000/?error=session_save_error');
+              }
+              console.log('Session saved for incomplete existing user. Redirecting...');
+              return res.redirect(`http://localhost:3000/signup/complete-profile`); // Redirect without token
+          });
         }
-        // -----------------------------------------------------
-      
       } else if (req.session && req.session.pendingSocialProfile) {
         // --- New User - Redirect for Profile Completion --- 
         // done(null, false) was called, user is false, but we have session data
