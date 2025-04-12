@@ -17,6 +17,7 @@ export default function SignupPage() {
     const [password, setPassword] = useState('');
     const [passwordConfirm, setPasswordConfirm] = useState('');
     const [name, setName] = useState('');
+    const [gender, setGender] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -33,7 +34,13 @@ export default function SignupPage() {
             return;
         }
 
-        const signupData = { email, password, name };
+        if (!gender) {
+            setError('Please select your gender.');
+            setIsLoading(false);
+            return;
+        }
+
+        const signupData = { email, password, name, gender };
 
         console.log('--- Sending Sign Up Request ---');
         console.log('POST /api/auth/signup');
@@ -58,17 +65,18 @@ export default function SignupPage() {
             console.log('Signup successful:', responseData);
 
             // --- Store token and user info ---
-            if (responseData.token && responseData.user && responseData.user.id) {
+            if (responseData.token && responseData.user && responseData.user.id && responseData.user.gender) {
                 localStorage.setItem('authToken', responseData.token);
                 localStorage.setItem('userId', responseData.user.id.toString());
-                console.log('Token and userId saved to localStorage.');
+                localStorage.setItem('userGender', responseData.user.gender);
+                console.log('Token, userId, and userGender saved to localStorage.');
 
                 alert('Signup complete! Please fill in your profile information.');
                 router.push('/profile'); // Redirect to profile page
             } else {
                  // Handle case where token or user data (especially ID) is missing
-                 console.error('Signup success response missing token or user data (id).', responseData);
-                 setError('Signup was successful, but an error occurred while processing user information. Please log in again.');
+                 console.error('Signup success response missing token, user id or gender.', responseData);
+                 setError('Signup successful, but user information processing failed. Please log in again.');
                  // Optionally clear storage and redirect to login
                  // localStorage.removeItem('authToken');
                  // localStorage.removeItem('userId');
@@ -142,6 +150,26 @@ export default function SignupPage() {
                                 value={name}
                                 onChange={(e) => setName(e.target.value)}
                             />
+                        </div>
+                    </div>
+
+                    {/* Gender Selection */}
+                    <div>
+                        <label htmlFor="gender" className={labelStyle}>Gender</label>
+                        <div className="mt-1">
+                            <select
+                                id="gender"
+                                name="gender"
+                                required
+                                value={gender}
+                                onChange={(e) => setGender(e.target.value)}
+                                className={`${inputBaseStyle} pl-3`}
+                            >
+                                <option value="" disabled>Select your gender</option>
+                                <option value="male">Male</option>
+                                <option value="female">Female</option>
+                                <option value="other">Other</option>
+                            </select>
                         </div>
                     </div>
 

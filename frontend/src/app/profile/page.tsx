@@ -153,11 +153,14 @@ function ProfileContent() {
             }
 
         } catch (err: any) {
-            console.error('Failed to fetch user profile:', err);
-            setError(err.message || '프로필 정보 로딩 중 오류 발생');
+            console.error('Failed to fetch user profile (catch block):', err);
+            // Authentication errors (401/403) are handled before the catch block.
+            // This catch block handles other errors like network issues or server errors (5xx).
+            setError(err.message || '프로필 정보 로딩 중 오류가 발생했습니다. 네트워크 연결을 확인하거나 잠시 후 다시 시도해주세요.');
             setUserProfile(null);
-            localStorage.removeItem('authToken');
-            localStorage.removeItem('userId');
+            // Do NOT remove token or redirect for non-authentication errors.
+            // localStorage.removeItem('authToken');
+            // localStorage.removeItem('userId');
         } finally {
             setIsLoading(false);
         }
@@ -272,11 +275,13 @@ function ProfileContent() {
             return;
         }
 
-        const dataToSend = {
+        // Construct the data to send, only include non-empty gender
+        const dataToSend: Partial<Record<keyof ProfileFormData, any>> = { // Use a more flexible type
             name: formData.name || null,
             dob: formData.dob || null,
             height: formData.height ? parseInt(formData.height, 10) : null,
-            gender: formData.gender || null,
+            // Include gender only if it has a value (not empty string)
+            ...(formData.gender && { gender: formData.gender }), 
             mbti: formData.mbti ? formData.mbti.toUpperCase() : null,
             weight: formData.weight ? parseFloat(formData.weight) : null,
             phone: formData.phone || null,
@@ -285,6 +290,12 @@ function ProfileContent() {
             occupation: formData.occupation || null,
             income: formData.income || null,
         };
+        // Ensure gender is not sent as null if it's an empty string in the form
+        if (dataToSend.gender === '') {
+             delete dataToSend.gender;
+        }
+
+        console.log("Data being sent for PUT:", dataToSend); // Log data being sent
 
         try {
             const response = await fetch('http://localhost:3001/api/profile/me', {
@@ -321,8 +332,13 @@ function ProfileContent() {
 
             const updatedUserProfile: UserProfile = await response.json();
             setUserProfile(updatedUserProfile);
+            // Store gender in localStorage upon successful profile update
+            if (updatedUserProfile.gender) {
+                localStorage.setItem('userGender', updatedUserProfile.gender);
+                console.log('ProfilePage: User gender saved to localStorage:', updatedUserProfile.gender);
+            }
             setIsEditing(false);
-            alert('프로필이 성공적으로 업데이트되었습니다!');
+            alert('Profile updated successfully!');
 
         } catch (err: any) {
             console.error('Failed to save profile:', err);

@@ -7,6 +7,7 @@ import { Op } from 'sequelize'; // Import Op for OR query
 const db = require('../../models'); // Adjust if models/index.js provides types
 const User = db.User;
 const Match = db.Match; // Import Match model
+const MatchingWaitList = db.MatchingWaitList; // MatchingWaitList 모델 import
 
 const router = express.Router();
 
@@ -40,6 +41,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'YOUR_VERY_SECRET_KEY_CHANGE_ME'; /
  *               - email
  *               - password
  *               - name
+ *               - gender
  *             properties:
  *               email:
  *                 type: string
@@ -53,6 +55,10 @@ const JWT_SECRET = process.env.JWT_SECRET || 'YOUR_VERY_SECRET_KEY_CHANGE_ME'; /
  *               name:
  *                  type: string
  *                  description: User's name
+ *               gender:
+ *                  type: string
+ *                  enum: ['male', 'female', 'other']
+ *                  description: User's gender
  *     responses:
  *       201:
  *         description: User created successfully
@@ -74,6 +80,7 @@ router.post('/signup',
     body('email').isEmail().normalizeEmail().withMessage('Please enter a valid email'), // Added normalizeEmail
     body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters long'),
     body('name').trim().notEmpty().withMessage('Name is required'), // Added trim
+    body('gender').isIn(['male', 'female', 'other']).withMessage('Invalid gender value'), // Added gender validation
     async (req: Request, res: Response, next: NextFunction): Promise<void> => {
         try {
             const errors = validationResult(req);
@@ -82,7 +89,7 @@ router.post('/signup',
                 return;
             }
 
-            const { email, password, name } = req.body;
+            const { email, password, name, gender } = req.body;
 
             // Check if user already exists (using Sequelize)
             const existingUser = await User.findOne({ where: { email } });
@@ -100,13 +107,33 @@ router.post('/signup',
                 email,
                 passwordHash,
                 name,
+                gender,
+                occupation: false // Explicitly set occupation to false on signup
                 // Add default/null values for other User model fields if necessary
                 // dob: null, age: null, etc. based on your model definition
             });
             console.log('New user created:', newUser.toJSON());
 
+            // --- Add male user to waitlist --- 
+            if (newUser.gender === 'male') {
+                try {
+                    await MatchingWaitList.create({ userId: newUser.id });
+                    console.log(`Male user ${newUser.id} added to MatchingWaitList.`);
+                } catch (waitlistError: any) {
+                    // Handle potential errors like unique constraint violation if logic somehow adds twice
+                    if (waitlistError.name === 'SequelizeUniqueConstraintError') {
+                        console.warn(`User ${newUser.id} already in MatchingWaitList (signup).`);
+                    } else {
+                        console.error(`Error adding user ${newUser.id} to MatchingWaitList:`, waitlistError);
+                        // Decide if signup should fail. For now, log and continue.
+                    }
+                }
+            }
+            // ------------------------------------
+
             // --- Generate JWT for the new user --- 
             const payload = { userId: newUser.id, email: newUser.email };
+            console.log('Generating JWT for new user with payload:', payload); // Log payload
             const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
             // --------------------------------------
 
@@ -115,7 +142,8 @@ router.post('/signup',
                  id: newUser.id,
                  email: newUser.email,
                  name: newUser.name,
-                 // Add other relevant fields like gender: newUser.gender etc. if needed immediately
+                 gender: newUser.gender,
+                 // Add other relevant fields like age: newUser.age, height: newUser.height etc. if needed immediately
              };
             // ---------------------------------------------------------
 
@@ -221,6 +249,24 @@ router.post('/login',
                 return;
             }
 
+            // --- Add male user to waitlist if not occupied --- 
+            if (user.gender === 'male' && user.occupation === false) {
+                try {
+                    const [waitlistEntry, created] = await MatchingWaitList.findOrCreate({
+                        where: { userId: user.id },
+                        defaults: { userId: user.id } // Create if not found
+                    });
+                    if (created) {
+                        console.log(`Male user ${user.id} added to MatchingWaitList on login.`);
+                    } else {
+                        console.log(`Male user ${user.id} already in MatchingWaitList (login check).`);
+                    }
+                } catch (waitlistError) {
+                    console.error(`Error ensuring user ${user.id} in MatchingWaitList during login:`, waitlistError);
+                }
+            }
+            // --------------------------------------------------
+
             // --- Check for active match for this user --- 
             let activeMatchId: string | null = null;
             try {
@@ -246,6 +292,7 @@ router.post('/login',
 
             // Generate JWT
             const payload = { userId: user.id, email: user.email };
+            console.log('Generating JWT for logged in user with payload:', payload); // Log payload
             const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
 
             // Respond with token, user info, and active match ID (if found)

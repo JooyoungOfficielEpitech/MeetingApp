@@ -57,9 +57,14 @@ export default function LoginPage() {
         if (data.token && data.user && data.user.id) {
             localStorage.setItem('authToken', data.token);
             localStorage.setItem('userId', data.user.id.toString());
-            // Optionally store more user info if needed elsewhere
-            // localStorage.setItem('userInfo', JSON.stringify(data.user));
-            console.log('Token and userId stored in localStorage');
+            // Store gender as well
+            if (data.user.gender) {
+                 localStorage.setItem('userGender', data.user.gender);
+            } else {
+                 // Handle case where gender might be null/missing after login
+                 localStorage.removeItem('userGender'); 
+            }
+            console.log('Token, userId, and userGender stored in localStorage');
             
             // --- Always redirect to main page after successful login ---
             console.log('Login successful, redirecting to main page.');

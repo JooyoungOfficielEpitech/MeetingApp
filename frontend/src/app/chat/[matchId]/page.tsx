@@ -268,13 +268,23 @@ function ChatContent() {
              setIsConnected(false); // Reflect that interaction is no longer possible
          });
 
-        // --- Listen for potential errors from backend during chat ---
+        // --- Listen for General Errors from Backend ---
         newSocket.on('error', (errorMessage: string) => {
-            console.error('ChatContent: Received error event from socket:', errorMessage);
-             // Avoid overwriting critical auth errors with generic chat errors
-             if (!error || !error.includes('Login required') || !error.includes('Authentication')) {
-                 setError(errorMessage);
-             }
+            console.error(`ChatContent: Received error event from socket: ${errorMessage}`);
+            // Handle specific error messages for redirection
+            if (errorMessage.includes('만료되었거나 유효하지 않은 채팅방입니다') || 
+                errorMessage.includes('상대방이 이미 채팅방을 나갔습니다')) {
+                setError(errorMessage); // Set the error to display briefly
+                alert(errorMessage + "\n\n메인 페이지로 이동합니다."); // Inform the user
+                router.push('/main'); // Redirect to main page
+            } else if (errorMessage.includes('메시지를 보낼 수 없는 방') || errorMessage.includes('비활성화된 채팅방')) {
+                // Errors related to sending messages in inactive/invalid rooms
+                setError(errorMessage);
+                setOpponentLeft(true); // Mark opponent as left to disable input
+            } else {
+                // General errors
+                setError(errorMessage);
+            }
         });
 
 

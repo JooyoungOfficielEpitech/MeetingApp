@@ -49,7 +49,13 @@ function AuthCallbackContent() {
          // --- Store userId --- 
          if (userInfo && userInfo.id) {
              localStorage.setItem('userId', userInfo.id.toString()); // Store userId
-             console.log('User info fetched and userId stored.', userInfo);
+             // Store gender as well
+             if (userInfo.gender) {
+                 localStorage.setItem('userGender', userInfo.gender);
+             } else {
+                  localStorage.removeItem('userGender');
+             }
+             console.log('User info fetched and userId/userGender stored.', userInfo);
              // Optionally store the whole userInfo if needed elsewhere
              // localStorage.setItem('userInfo', JSON.stringify(userInfo));
 
@@ -67,6 +73,7 @@ function AuthCallbackContent() {
          console.error('Failed to fetch user info after callback:', err);
          localStorage.removeItem('authToken'); // Remove potentially invalid token
          localStorage.removeItem('userId');   // Clear userId as well
+         localStorage.removeItem('userGender'); // Clear gender as well
          // localStorage.removeItem('userInfo');
          alert(`An error occurred during login processing: ${err.message}. Please log in again.`);
          router.replace('/'); // Redirect to login

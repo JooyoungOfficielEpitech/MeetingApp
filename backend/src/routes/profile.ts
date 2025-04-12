@@ -1,4 +1,5 @@
 import express, { Request, Response, NextFunction, RequestHandler } from 'express';
+import { authenticateToken } from '../middleware/authMiddleware';
 const db = require('../../models');
 const User = db.User;
 const Match = db.Match;
@@ -35,7 +36,7 @@ const router = express.Router();
  *       500:
  *         description: Server error
  */
-router.get('/me', (async (req: Request, res: Response, next: NextFunction) => {
+router.get('/me', authenticateToken, (async (req: Request, res: Response, next: NextFunction) => {
     console.log('[/api/profile/me GET] Received request. req.user:', (req as any).user);
     try {
         const userId = (req as any).user?.userId;
@@ -57,6 +58,10 @@ router.get('/me', (async (req: Request, res: Response, next: NextFunction) => {
         }
         
         console.log(`User found for ID: ${userId}, sending profile.`);
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+        res.setHeader('Surrogate-Control', 'no-store');
         return res.json(user);
 
     } catch (error) {
@@ -104,7 +109,7 @@ router.get('/me', (async (req: Request, res: Response, next: NextFunction) => {
  *       500:
  *         description: Server error
  */
-router.put('/me', (async (req: Request, res: Response, next: NextFunction) => {
+router.put('/me', authenticateToken, (async (req: Request, res: Response, next: NextFunction) => {
     console.log('[/api/profile/me PUT] Received request. req.user:', (req as any).user);
     try {
         const userId = (req as any).user?.userId;
@@ -203,7 +208,7 @@ router.put('/me', (async (req: Request, res: Response, next: NextFunction) => {
  *       500:
  *         description: Server error during deactivation.
  */
-router.delete('/me', (async (req: Request, res: Response, next: NextFunction) => {
+router.delete('/me', authenticateToken, (async (req: Request, res: Response, next: NextFunction) => {
     console.log('[/api/profile/me DELETE] Received request. req.user:', (req as any).user);
     try {
         const userId = (req as any).user?.userId;

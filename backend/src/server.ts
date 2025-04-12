@@ -13,12 +13,14 @@ import { Strategy as GoogleStrategy } from 'passport-google-oauth20'; // Import 
 import jwt from 'jsonwebtoken'; // Import jwt for token generation
 import { Socket } from 'socket.io'; // Import Socket type
 import { authenticateToken } from './middleware/authMiddleware'; // Import authentication middleware
+import { Op } from 'sequelize'; // Import Op for SQL operations
 
 // --- Import User model --- 
 const db = require('../models'); // Adjust path if needed
 const User = db.User;
 const Match = db.Match; // Match 모델 import 추가
 const Message = db.Message; // Message 모델 import 추가
+const MatchingWaitList = db.MatchingWaitList; // Import MatchingWaitList
 // -------------------------
 
 
@@ -122,20 +124,20 @@ passport.use(new GoogleStrategy({
 // ----------------------------------------------- 
 
 // --- In-memory storage for connected users and waiting users --- 
+// Define Gender type again
+type Gender = 'male' | 'female' | 'other'; 
+
 interface ConnectedUser {
     userId: number;
     socketId: string;
-    gender: Gender | null; // Use Gender type
+    gender: Gender | null; 
+    isOccupied: boolean; // Track if the user is currently in an active match
 }
 
-type Gender = 'male' | 'female' | 'other'; // Define Gender type
-
+// Map stores all connected users
 const connectedUsers = new Map<string, ConnectedUser>();
-const waitingUsers: Record<Gender, ConnectedUser[]> = { // Use Record for type safety
-    male: [],
-    female: [],
-    other: [],
-};
+// Array stores only FEMALE users actively waiting for a match
+const waitingUsers: ConnectedUser[] = []; 
 // ---------------------------------------------------------------
 
 const io = new SocketIOServer(server, {
@@ -148,37 +150,60 @@ const io = new SocketIOServer(server, {
 // --- Socket.IO Authentication Middleware ---
 io.use(async (socket: Socket, next) => {
     console.log(`[AuthMiddleware] Connection attempt by Socket ID: ${socket.id}`);
-    console.log(`[AuthMiddleware] Received handshake auth object:`, socket.handshake.auth); // Keep logging auth
-
     const token = socket.handshake.auth.token;
-    const matchIdFromAuth = socket.handshake.auth.matchId; // Log received matchId
-
-    console.log(`[AuthMiddleware] Token present: ${!!token}, Match ID from auth: ${matchIdFromAuth || 'MISSING!'}`);
 
     if (!token) {
         console.error("[AuthMiddleware] Socket connection error: No token provided.");
         return next(new Error('Authentication error: No token provided'));
     }
     try {
+        // Verify the token first
         const decoded = jwt.verify(token, JWT_SECRET) as { userId: number; email: string };
-        console.log("[AuthMiddleware] Token verified for user ID:", decoded.userId);
+        const userIdFromToken = decoded.userId;
+        console.log("[AuthMiddleware] Token verified for user ID:", userIdFromToken);
 
-        const user = await User.findByPk(decoded.userId, { attributes: ['id', 'gender'] });
-        if (!user) {
-             console.error(`[AuthMiddleware] Socket connection error: User not found for ID ${decoded.userId}`);
-             return next(new Error('Authentication error: User not found'));
+        let userGender: Gender | null = null;
+        let isOccupied: boolean = false;
+        let userFoundInDb = false;
+
+        // Attempt to fetch current user status from DB
+        try {
+            const user = await User.findByPk(userIdFromToken, { attributes: ['id', 'gender', 'occupation'] });
+            if (user) {
+                userFoundInDb = true;
+                userGender = (user.gender && ['male', 'female', 'other'].includes(user.gender)) ? user.gender as Gender : null;
+                isOccupied = user.occupation === true;
+                console.log(`[AuthMiddleware] User ${userIdFromToken} found in DB. Gender: ${userGender}, Occupation: ${isOccupied}`);
+            } else {
+                // User not found in DB - might be a timing issue after signup
+                console.warn(`[AuthMiddleware] User ${userIdFromToken} NOT found in DB (possibly right after signup). Proceeding with default status.`);
+                // Keep default gender (null) and isOccupied (false)
+            }
+        } catch (dbError: any) {
+            // Handle DB errors other than "not found"
+            console.error(`[AuthMiddleware] DB error fetching user ${userIdFromToken}:`, dbError);
+            // Optionally, reject connection on DB error?
+            // return next(new Error('Database error during authentication'));
+            // For now, proceed with default status but log the error.
+            console.warn(`[AuthMiddleware] Proceeding with default status for user ${userIdFromToken} due to DB error.`);
         }
 
-        const userGender = (user.gender && ['male', 'female', 'other'].includes(user.gender)) ? user.gender as Gender : null;
-
-        // Store only user info, REMOVE initialMatchId storage from here
-        (socket as any).user = { userId: decoded.userId, gender: userGender };
+        // Store user info on the socket - always use userId from token, use DB status if found
+        (socket as any).user = { userId: userIdFromToken, gender: userGender, isOccupied: isOccupied }; 
         console.log(`[AuthMiddleware] Stored user info on socket:`, (socket as any).user);
 
-        next();
-    } catch (err: any) {
-        console.error("[AuthMiddleware] Socket connection error: Invalid token.", err.message); // Log specific error message
-        next(new Error('Authentication error: Invalid token'));
+        next(); // Allow connection
+
+    } catch (jwtError: any) {
+        // Handle JWT verification errors (invalid token, expired)
+        console.error("[AuthMiddleware] JWT Verification Error:", jwtError.message);
+        let errorMessage = 'Authentication error: Invalid token';
+        if (jwtError.name === 'TokenExpiredError') {
+            errorMessage = 'Authentication error: Token expired';
+        } else if (jwtError.name === 'JsonWebTokenError') {
+            errorMessage = `Authentication error: ${jwtError.message}`;
+        }
+        next(new Error(errorMessage));
     }
 });
 // -------------------------------------------
@@ -188,59 +213,186 @@ io.on('connection', (socket: any) => {
     // Ensure user object exists from middleware before proceeding
     if (!socket.user || !socket.user.userId) {
         console.error("Connection handler: User info missing on socket. Disconnecting.");
-        socket.disconnect(true); // Force disconnect if auth middleware failed unexpectedly
+        socket.disconnect(true); 
         return;
     }
 
     const userId: number = socket.user.userId;
     const userGender: Gender | null = socket.user.gender;
-    // Read matchId DIRECTLY from handshake.auth within the connection handler
+    let isOccupied: boolean = socket.user.isOccupied;
     const initialMatchId: string | null = socket.handshake.auth.matchId;
     let currentMatchId: string | null = null;
 
-    console.log(`User connected: ${userId} (Socket ID: ${socket.id}). Read initialMatchId from handshake.auth: ${initialMatchId || 'N/A'}`);
+    console.log(`User connected: ${userId} (Gender: ${userGender}, Initial Occupied: ${isOccupied}, Socket ID: ${socket.id}). InitialMatchId: ${initialMatchId || 'N/A'}`);
 
-    // --- Define sendChatHistory function (remains the same scope) ---
+    // Update connectedUsers map
+    const userInfo: ConnectedUser = { userId, socketId: socket.id, gender: userGender, isOccupied };
+    connectedUsers.set(socket.id, userInfo);
+    console.log('[Connection] Connected Users Map:', Array.from(connectedUsers.values()).map(u => `${u.userId}(${u.gender}, occ:${u.isOccupied})`)); // More detailed log
+
+    // Define sendChatHistory here so it's accessible by attemptMatch
     const sendChatHistory = async (matchIdToSendFor: string | null) => {
-        if (!matchIdToSendFor) {
-            console.log("sendChatHistory called with null matchId, skipping.");
-            return;
-        }
+        if (!matchIdToSendFor) { return; }
         try {
-            console.log(`Fetching chat history for match: ${matchIdToSendFor}`);
-            const history = await Message.findAll({
-                where: { matchId: matchIdToSendFor },
-                order: [['createdAt', 'ASC']],
-                attributes: ['senderId', 'text', 'createdAt'],
-            });
-            const formattedHistory = history.map((msg: any) => ({
-                 senderId: msg.senderId,
-                 text: msg.text,
-                 timestamp: msg.createdAt.getTime(),
-            }));
-            console.log(`Sending chat history (${formattedHistory.length} messages) to user ${userId} for match ${matchIdToSendFor}`);
+            const history = await Message.findAll({ where: { matchId: matchIdToSendFor }, order: [['createdAt', 'ASC']], attributes: ['senderId', 'text', 'createdAt'] });
+            const formattedHistory = history.map((msg: any) => ({ senderId: msg.senderId, text: msg.text, timestamp: msg.createdAt.getTime() }));
             socket.emit('chat-history', formattedHistory);
+            console.log(`Sent chat history (${formattedHistory.length} messages) for match ${matchIdToSendFor}`);
         } catch (error) {
-            console.error(`Error fetching chat history for match ${matchIdToSendFor}:`, error);
-            socket.emit('error', '채팅 기록을 불러오는 중 오류가 발생했습니다.');
+            console.error(`Error fetching/sending chat history for ${matchIdToSendFor}:`, error);
+            socket.emit('error', '채팅 기록 로딩 오류');
         }
     };
-    // ---------------------------------------------------------
+
+    // --- Matching Logic (Triggered ONLY by Female Users) --- 
+    socket.on('start-matching', async () => {
+        // Guard clauses: Check if female, not occupied, not already waiting
+        if (userGender !== 'female') {
+            console.warn(`User ${userId} (Gender: ${userGender}) tried to emit 'start-matching'. Ignoring.`);
+            return;
+        }
+        if (isOccupied) {
+            console.warn(`User ${userId} is already occupied. Cannot start matching.`);
+            socket.emit('matching-error', '이미 매칭된 상태입니다.');
+            return;
+        }
+        if (waitingUsers.some(u => u.userId === userId)) {
+            console.log(`User ${userId} is already in the female waiting list.`);
+            socket.emit('already-waiting');
+            return;
+        }
+
+        console.log(`Female user ${userId} requested matching.`);
+
+        // Find an available male user from the DATABASE WAITLIST
+        let availableMaleEntry: any = null;
+        try {
+            // Find any user in the waitlist
+            availableMaleEntry = await MatchingWaitList.findOne({ 
+                // You might want to add an order clause, e.g., oldest entry first
+                // order: [[ 'createdAt', 'ASC' ]]
+            });
+        } catch (dbError: any) {
+            console.error(`Error finding available male user in MatchingWaitList for user ${userId}:`, dbError);
+            socket.emit('matching-error', '매칭 상대를 찾는 중 오류가 발생했습니다.');
+            return;
+        }
+
+        if (availableMaleEntry) {
+            const opponentUserId = availableMaleEntry.userId;
+            console.log(`Match found for Female User ${userId} with Male User ${opponentUserId} from DB WaitList.`);
+            const matchId = `match-${userId}-${opponentUserId}-${Date.now()}`;
+            
+            // --- Remove male from DB WaitList FIRST --- 
+            try {
+                 await MatchingWaitList.destroy({ where: { userId: opponentUserId } });
+                 console.log(`Removed Male ${opponentUserId} from MatchingWaitList.`);
+            } catch (destroyError: any) {
+                 console.error(`Error removing male ${opponentUserId} from waitlist:`, destroyError);
+                 socket.emit('matching-error', '매칭 상대를 대기 목록에서 제거하는 중 오류 발생.');
+                 return; // Stop matching if we can't remove
+            }
+            // -----------------------------------------
+
+            // Find opponent's socket ID if they are currently connected
+            let opponentSocketId: string | null = null;
+            for (const [socketId, connectedUser] of connectedUsers.entries()) {
+                if (connectedUser.userId === opponentUserId) {
+                    opponentSocketId = socketId;
+                    break;
+                }
+            }
+            console.log(`Opponent ${opponentUserId} is ${opponentSocketId ? 'ONLINE' : 'OFFLINE'}.`);
+
+            try {
+                // --- DB Updates --- 
+                await Match.create({ matchId: matchId, user1Id: userId, user2Id: opponentUserId, isActive: true });
+                console.log('New match record created in DB:', matchId);
+                await User.update({ occupation: true }, { where: { id: userId } });
+                await User.update({ occupation: true }, { where: { id: opponentUserId } });
+                console.log(`Set DB occupation=true for users ${userId} and ${opponentUserId}`);
+
+                // --- Update In-Memory State (connectedUsers map) --- 
+                const initiatorInfo = connectedUsers.get(socket.id);
+                if (initiatorInfo) initiatorInfo.isOccupied = true;
+                 isOccupied = true; // Update local variable for initiator
+                if (opponentSocketId) { 
+                    const opponentInfo = connectedUsers.get(opponentSocketId);
+                    if (opponentInfo) opponentInfo.isOccupied = true;
+                    console.log(`Set Map isOccupied=true for users ${userId} and ONLINE opponent ${opponentUserId}.`);
+                } else {
+                    console.log(`Set Map isOccupied=true for user ${userId}. Opponent ${opponentUserId} is offline.`);
+                }
+                console.log('[DB WaitList Match Success] Connected Users Map:', Array.from(connectedUsers.values()).map(u => `${u.userId}(occ:${u.isOccupied})`));
+
+            } catch (dbError: any) {
+                console.error('Error during match creation or user status update (DB Find WaitList):', dbError);
+                 io.to(socket.id).emit('matching-error', '매치 생성 또는 상태 업데이트 중 오류 발생.');
+                 // IMPORTANT: Put male back in waitlist if subsequent DB updates fail
+                 MatchingWaitList.findOrCreate({ where: { userId: opponentUserId } })
+                    .catch((err: any) => console.error("Failed to put male back in waitlist on error:", err)); // Typed error
+                 return;
+            }
+
+            // --- Notify Users & Join Room --- 
+            io.to(socket.id).emit('match-success', { matchId: matchId, opponentId: opponentUserId });
+            socket.join(matchId);
+            currentMatchId = matchId; 
+            console.log(`User ${userId} joined room ${matchId}. Sent match-success.`);
+            sendChatHistory(currentMatchId);
+
+            if (opponentSocketId) {
+                const opponentSocket = io.sockets.sockets.get(opponentSocketId);
+                if (opponentSocket) {
+                    io.to(opponentSocketId).emit('match-success', { matchId: matchId, opponentId: userId });
+                    opponentSocket.join(matchId);
+                    console.log(`ONLINE Opponent User ${opponentUserId} joined room ${matchId}. Sent match-success.`);
+                } else {
+                    console.warn(`Opponent socket ${opponentSocketId} (User ${opponentUserId}) disappeared before joining room ${matchId}.`);
+                }
+            }
+
+        } else {
+            // No available male user found in WaitList, add the female user to the memory waiting list
+            console.log(`No available male opponent found in DB WaitList, adding Female User ${userId} to memory waiting list.`);
+            const currentUserInfo = connectedUsers.get(socket.id);
+            if (currentUserInfo) {
+               if (!waitingUsers.some((u) => u.userId === userId)) {
+                   waitingUsers.push(currentUserInfo);
+               } else {
+                   console.log(`User ${userId} is already in the female waiting list.`);
+               }
+               console.log("Waiting List (Females waiting for Males):", waitingUsers.map(u => u.userId));
+               socket.emit('waiting-for-match');
+            } else {
+                console.error(`Could not find user info for ${userId} in connectedUsers map before adding to memory waiting list.`);
+                socket.emit('matching-error', '서버 오류: 사용자 정보를 찾을 수 없습니다.');
+            }
+        }
+    });
 
     // --- Auto-join Room and Fetch History on Initial Connect ---
     if (initialMatchId) {
-        // Verify the match is still active before joining
+        // Verify the match status before joining
         const verifyAndJoin = async () => {
             try {
-                const match = await Match.findOne({ where: { matchId: initialMatchId, isActive: true } });
-                if (match) {
+                // Find the match by ID, regardless of isActive status initially
+                const match = await Match.findOne({ where: { matchId: initialMatchId } });
+
+                if (!match) {
+                    // Case 1: Match doesn't exist at all
+                    console.warn(`User ${userId} attempted to join non-existent match: ${initialMatchId}`);
+                    socket.emit('error', '만료되었거나 유효하지 않은 채팅방입니다.'); 
+                } else if (!match.isActive) {
+                    // Case 2: Match exists but is already inactive (opponent likely left)
+                    console.warn(`User ${userId} attempted to join an INACTIVE match: ${initialMatchId}`);
+                    socket.emit('error', '상대방이 이미 채팅방을 나갔습니다.'); // More specific error message
+                } else {
+                    // Case 3: Match exists and is active - Proceed to join
                     socket.join(initialMatchId);
                     currentMatchId = initialMatchId; // Set server-side tracking
                     console.log(`User ${userId} joined active Socket.IO room: ${currentMatchId}`);
                     sendChatHistory(currentMatchId); // Send history
-                } else {
-                    console.warn(`User ${userId} attempted to join inactive or non-existent match: ${initialMatchId}`);
-                    socket.emit('error', '만료되었거나 유효하지 않은 채팅방입니다.');
                 }
             } catch (error) {
                  console.error(`Error verifying match ${initialMatchId} for user ${userId}:`, error);
@@ -252,78 +404,6 @@ io.on('connection', (socket: any) => {
          console.warn(`User ${userId} connected without an initialMatchId in handshake.auth.`);
     }
     // ---------------------------------------------------------
-
-    const userInfo: ConnectedUser = { userId: userId, socketId: socket.id, gender: userGender };
-    connectedUsers.set(socket.id, userInfo);
-
-    // --- Matching Logic --- 
-    socket.on('start-matching', async () => {
-        console.log(`User ${userId} requested matching.`);
-
-        if (!userGender) {
-             console.warn(`User ${userId} cannot match: Gender not set or invalid.`);
-             socket.emit('matching-error', '성별 정보가 설정되지 않아 매칭을 시작할 수 없습니다.');
-             return;
-        }
-
-        let opponentGender: Gender | null = null;
-        if (userGender === 'male') opponentGender = 'female';
-        else if (userGender === 'female') opponentGender = 'male';
-        
-        if (!opponentGender) {
-             console.warn(`User ${userId} cannot match: Unsupported gender for matching (${userGender}).`);
-             socket.emit('matching-error', '현재 성별(${userGender})은 매칭을 지원하지 않습니다.');
-             return;
-        }
-
-        if (waitingUsers[opponentGender].length > 0) {
-            const opponent = waitingUsers[opponentGender].shift()!;
-            console.log(`Match found for User ${userId} with User ${opponent.userId}`);
-            const matchId = `match-${userId}-${opponent.userId}-${Date.now()}`;
-            try {
-                 await Match.create({ matchId: matchId, user1Id: userId, user2Id: opponent.userId, isActive: true });
-                 console.log('New match record created in DB:', matchId);
-            } catch (dbError) {
-                console.error('Error creating Match record in DB:', dbError);
-                 io.to(socket.id).emit('matching-error', '매치 정보를 기록하는 중 오류가 발생했습니다.');
-                 io.to(opponent.socketId).emit('matching-error', '매치 정보를 기록하는 중 오류가 발생했습니다.');
-                 waitingUsers[opponentGender].unshift(opponent);
-                 console.log(`Opponent ${opponent.userId} put back in waiting list due to DB error.`);
-                 return;
-            }
-            io.to(socket.id).emit('match-success', { matchId: matchId, opponentId: opponent.userId });
-            io.to(opponent.socketId).emit('match-success', { matchId: matchId, opponentId: userId });
-            socket.join(matchId);
-            const opponentSocket = io.sockets.sockets.get(opponent.socketId);
-            if (opponentSocket) {
-                 opponentSocket.join(matchId);
-                 console.log(`User ${opponent.userId} also joined room ${matchId}`);
-                 currentMatchId = matchId; // Set currentMatchId for the initiator
-                 // --- Call sendChatHistory here after successful match ---
-                 sendChatHistory(currentMatchId);
-                 // ------------------------------------------------------
-            } else {
-                 console.warn(`Opponent socket ${opponent.socketId} not found during match setup.`);
-                 try {
-                      await Match.update({ isActive: false }, { where: { matchId: matchId } });
-                      console.log(`Match record ${matchId} deactivated due to missing opponent socket during match setup.`);
-                  } catch (updateError) {
-                       console.error(`Error deactivating match record ${matchId}:`, updateError);
-                  }
-                  io.to(socket.id).emit('matching-error', '매칭된 상대방과의 연결에 실패했습니다.');
-                  return;
-            }
-        } else {
-            console.log(`No opponent found for ${userGender}, adding User ${userId} to waiting list.`);
-             if (!waitingUsers[userGender].some((u: ConnectedUser) => u.userId === userId)) {
-                waitingUsers[userGender].push(userInfo);
-             } else {
-                console.log(`User ${userId} is already in the waiting list.`);
-             }
-             console.log("Waiting Lists:", waitingUsers);
-             socket.emit('waiting-for-match');
-        }
-    });
 
     // --- Handle Chat Messages --- 
     socket.on('chat message', async (data: { matchId: string, text: string }) => {
@@ -380,22 +460,83 @@ io.on('connection', (socket: any) => {
     // --- Handle Force Leaving Chat Room (Permanent) ---
     socket.on('force-leave-chat', async (matchId: string) => {
         console.log(`User ${userId} requested to FORCE LEAVE chat room: ${matchId}`);
+        let opponentUserId: number | null = null;
+        let opponentSocketId: string | null = null; // Store opponent socket ID if found
         try {
             const match = await Match.findOne({ where: { matchId: matchId } });
             if (match) {
+                opponentUserId = (match.user1Id === userId) ? match.user2Id : match.user1Id;
+
+                // Find opponent's socket ID from connectedUsers map
+                for (const [socketId, connectedUser] of connectedUsers.entries()) {
+                    if (connectedUser.userId === opponentUserId) {
+                        opponentSocketId = socketId;
+                        break;
+                    }
+                }
+
                 if (match.isActive) {
-                    await match.update({ isActive: false }); // Deactivate the match
+                    await match.update({ isActive: false }); 
                     console.log(`Match ${matchId} DEACTIVATED in DB by user ${userId}.`);
-                    socket.to(matchId).emit('opponent-left-chat', { userId: userId }); // Use existing event name
+                    socket.to(matchId).emit('opponent-left-chat', { userId: userId }); 
                     console.log(`Notified room ${matchId} that user ${userId} has left permanently.`);
+
+                    // Reset DB occupation status
+                    await User.update({ occupation: false }, { where: { id: userId } });
+                    if (opponentUserId) {
+                        await User.update({ occupation: false }, { where: { id: opponentUserId } });
+                        console.log(`Reset DB occupation=false for users ${userId} and ${opponentUserId}.`);
+                    }
+
+                    // --- Reset In-Memory State (isOccupied) --- 
+                    const initiatorInfo = connectedUsers.get(socket.id);
+                    if (initiatorInfo) initiatorInfo.isOccupied = false;
+                    let opponentInfo = null;
+                    if (opponentSocketId) opponentInfo = connectedUsers.get(opponentSocketId);
+                    if (opponentInfo) opponentInfo.isOccupied = false;
+                     // Update local isOccupied variable for the current socket
+                    isOccupied = false;
+                    console.log(`Reset Map isOccupied=false for users ${userId} and ${opponentUserId}.`);
+                    console.log('[Force Leave] Connected Users Map:', Array.from(connectedUsers.values()).map(u => `${u.userId}(occ:${u.isOccupied})`));
+
+                    // --- Add male user(s) back to MatchingWaitList --- 
+                    let maleToAddBack: number | null = null;
+                    if (userGender === 'male') maleToAddBack = userId;
+                    else if (opponentInfo && opponentInfo.gender === 'male') maleToAddBack = opponentUserId;
+                    
+                    if (maleToAddBack) {
+                        const maleId = maleToAddBack;
+                        MatchingWaitList.findOrCreate({ where: { userId: maleId } })
+                         .then(([entry, created]: [any, boolean]) => { 
+                            if (created) console.log(`Male user ${maleId} added back to MatchingWaitList after match end.`);
+                            // REMOVED: Immediate match attempt removed from here.
+                            // It will be handled if/when the male user connects/reconnects.
+                         })
+                         .catch((error: any) => console.error(`Error adding male user ${maleId} back to waitlist:`, error));
+                    }
+                    // -----------------------------------------------------
+
                 } else {
                     console.log(`Match ${matchId} was already inactive when user ${userId} tried to force leave.`);
+                    // Optional: Reset occupation even if match was already inactive, as a safety measure?
+                    // await User.update({ occupation: false }, { where: { id: userId } });
+                    // if (opponentUserId) await User.update({ occupation: false }, { where: { id: opponentUserId } });
                 }
             } else {
                 console.warn(`Match ${matchId} not found in DB when trying to force leave.`);
+                 // Safety measure: Reset leaving user's occupation if match not found
+                 await User.update({ occupation: false }, { where: { id: userId } });
+                 console.log(`Reset occupation=false for user ${userId} as match ${matchId} was not found.`);
             }
         } catch (error) {
-            console.error(`Error deactivating match ${matchId} on force leave:`, error);
+            console.error(`Error during force leave for match ${matchId}:`, error);
+            // Safety measure: Attempt to reset leaving user's occupation on error
+            try {
+               await User.update({ occupation: false }, { where: { id: userId } });
+               console.log(`Reset occupation=false for user ${userId} after error during force leave.`);
+            } catch (updateError) {
+               console.error(`Failed to reset occupation for user ${userId} after force leave error:`, updateError);
+            }
         } finally {
              socket.leave(matchId);
              console.log(`User ${userId} left Socket.IO room: ${matchId}`);
@@ -407,25 +548,16 @@ io.on('connection', (socket: any) => {
     // -----------------------------------------------
 
     // --- Handle Disconnection (Unexpected or Back Button) ---
-    socket.on('disconnect', (reason: string) => {
+    socket.on('disconnect', async (reason: string) => { // Keep async if other async operations remain, otherwise remove
       console.log(`User disconnected: ${userId} (Socket ID: ${socket.id}, Reason: ${reason})`);
+      const wasWaiting = waitingUsers.findIndex((u) => u.socketId === socket.id);
+      if (wasWaiting > -1) {
+             waitingUsers.splice(wasWaiting, 1);
+             console.log(`Female user ${userId} removed from waiting list due to disconnect.`);
+             console.log("Waiting List after disconnect:", waitingUsers.map(u => u.userId));
+      }
       connectedUsers.delete(socket.id);
-      const disconnectedMatchId = currentMatchId;
-
-      // Remove user from waiting list if they were waiting
-      if (userGender && waitingUsers[userGender]) {
-            const waitingIndex = waitingUsers[userGender].findIndex((u: ConnectedUser) => u.socketId === socket.id);
-            if (waitingIndex > -1) {
-                waitingUsers[userGender].splice(waitingIndex, 1);
-                console.log(`User ${userId} removed from waiting list (${userGender}) due to disconnect.`);
-            }
-      }
-      console.log("Waiting Lists after disconnect:", waitingUsers);
-
-      // DO NOT notify opponent or deactivate match on simple disconnect
-      if (disconnectedMatchId) {
-           console.log(`Socket for user ${userId} disconnected (Reason: ${reason}) while associated with room ${disconnectedMatchId}. No action taken.`);
-      }
+      console.log('[Disconnection] Connected Users Map:', Array.from(connectedUsers.values()).map(u => `${u.userId}(occ:${u.isOccupied})`));
     });
     // ----------------------------------------------------
 });
@@ -464,6 +596,7 @@ app.use(express.json());
 import authRoutes from './routes/auth';
 import profileRoutes from './routes/profile';
 import matchesRouter from './routes/matches';
+import mainRoutes from './routes/main'; // Import the new main routes
 
 // --- Google Auth Routes (Callback Updated with Custom Handler) --- 
 // 1. Route to start Google authentication
@@ -542,8 +675,9 @@ app.get('/api/auth/google/callback',
 // --------------------------
 
 app.use('/api/auth', authRoutes); 
-app.use('/api/profile', authenticateToken, profileRoutes); // Apply authenticateToken middleware
-app.use('/api/matches', authenticateToken, matchesRouter); // Register matches routes with authentication
+app.use('/api/profile', profileRoutes); // Applied authenticateToken within the router file for profile
+app.use('/api/matches', matchesRouter); // Applied authenticateToken within the router file for matches
+app.use('/api/main', mainRoutes);      // Applied authenticateToken within the router file for main
 
 const PORT = process.env.PORT || 3001; // Use a different port than frontend
 
