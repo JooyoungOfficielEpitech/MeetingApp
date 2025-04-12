@@ -182,9 +182,9 @@ router.get('/matches/recent', async (req: Request, res: Response, next: NextFunc
 
 /**
  * @swagger
- * /api/admin/users/pending:
+ * /api/admin/users:
  *   get:
- *     summary: Get list of users pending approval (admin only)
+ *     summary: Get list of users (admin only)
  *     tags: [Admin, Users]
  *     security:
  *       - bearerAuth: []
@@ -201,9 +201,13 @@ router.get('/matches/recent', async (req: Request, res: Response, next: NextFunc
  *         name: search
  *         schema: { type: string }
  *         description: Optional search term for user name or email
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [active, pending_approval, rejected] }
+ *         description: Optional filter by user status
  *     responses:
  *       200:
- *         description: List of pending users retrieved successfully
+ *         description: List of users retrieved successfully
  *         content:
  *           application/json:
  *             schema:
@@ -219,23 +223,35 @@ router.get('/matches/recent', async (req: Request, res: Response, next: NextFunc
  *       403: { description: 'Forbidden (not an admin)' }
  *       500: { description: 'Server error' }
  */
-router.get('/users/pending', async (req: Request, res: Response, next: NextFunction) => {
-    console.log('[GET /api/admin/users/pending] Request received.');
+router.get('/users', async (req: Request, res: Response, next: NextFunction) => {
+    console.log('[GET /api/admin/users] Request received.');
     const page = parseInt(req.query.page as string || '1', 10);
     const limit = parseInt(req.query.limit as string || '10', 10);
     const offset = (page - 1) * limit;
     const searchTerm = req.query.search as string || '';
+    const statusFilter = req.query.status as string; // e.g., 'pending_approval', 'active'
 
     const whereClause: any = {
-        status: 'pending_approval',
-        deletedAt: null // Exclude soft-deleted users
+        deletedAt: null // Always exclude soft-deleted users
     };
 
+    // Apply status filter if provided
+    if (statusFilter && ['active', 'pending_approval', 'rejected'].includes(statusFilter)) {
+        whereClause.status = statusFilter;
+        console.log(`[Admin Users] Filtering by status: ${statusFilter}`);
+    } else {
+        // Default: Fetch users who are NOT rejected
+        whereClause.status = { [Op.notIn]: ['rejected'] };
+        console.log(`[Admin Users] Fetching non-rejected users.`);
+    }
+
+    // Apply search term if provided
     if (searchTerm) {
         whereClause[Op.or] = [
             { name: { [Op.like]: `%${searchTerm}%` } },
             { email: { [Op.like]: `%${searchTerm}%` } }
         ];
+        console.log(`[Admin Users] Searching for: ${searchTerm}`);
     }
 
     try {
@@ -243,12 +259,12 @@ router.get('/users/pending', async (req: Request, res: Response, next: NextFunct
             where: whereClause,
             limit: limit,
             offset: offset,
-            order: [['createdAt', 'ASC']], // Show oldest pending users first
+            order: [['createdAt', 'DESC']], // Show newest users first by default
             attributes: { exclude: ['passwordHash'] } // Exclude sensitive info
         });
 
         const totalPages = Math.ceil(count / limit);
-        console.log(`[Admin Pending Users] Found ${count} pending users. Page ${page}/${totalPages}.`);
+        console.log(`[Admin Users] Found ${count} users matching criteria. Page ${page}/${totalPages}.`);
 
         res.status(200).json({
             users: rows,
@@ -258,7 +274,7 @@ router.get('/users/pending', async (req: Request, res: Response, next: NextFunct
         });
 
     } catch (error) {
-        console.error('[GET /api/admin/users/pending] Error fetching pending users:', error);
+        console.error('[GET /api/admin/users] Error fetching users:', error);
         next(error);
     }
 });
@@ -397,23 +413,35 @@ router.patch('/users/:userId/reject', async (req: Request, res: Response, next: 
     }
 
     try {
-        const user = await User.findOne({ where: { id: userId, status: 'pending_approval' } });
+        // Find user who is 'pending_approval' OR 'active' and not deleted
+        const user = await User.findOne({
+            where: {
+                id: userId,
+                status: { [Op.in]: ['pending_approval', 'active'] }, // Allow rejecting pending or active users
+                deletedAt: null
+            }
+        });
 
         if (!user) {
-             console.warn(`[Admin Reject] User ${userId} not found or not pending approval.`);
+             console.warn(`[Admin Reject] User ${userId} not found, not rejectable (status might be '${user?.status}', or deleted).`);
              const existingUser = await User.findByPk(userId);
-             if (existingUser && existingUser.status !== 'pending_approval') {
-                  res.status(400).json({ message: `User status is already '${existingUser.status}'.`});
-                  return; // Return void
+             if (!existingUser) {
+                 res.status(404).json({ message: 'User not found.' });
+             } else if (existingUser.status === 'rejected') {
+                 res.status(400).json({ message: 'User is already rejected.' });
+             } else if (existingUser.deletedAt) {
+                 res.status(400).json({ message: 'User is deleted.' });
+             } else {
+                 // Should not happen based on the findOne query, but handle defensively
+                 res.status(400).json({ message: `User cannot be rejected (current status: ${existingUser.status}).`});
              }
-             res.status(404).json({ message: 'User not found or not pending approval.'});
              return; // Return void
         }
 
         // Update status to 'rejected'
         user.status = 'rejected';
         // Optionally: Set deletion timestamp if using soft delete
-        // user.deletedAt = new Date(); 
+        // user.deletedAt = new Date();
         await user.save();
         console.log(`[Admin Reject] User ${userId} status updated to 'rejected'.`);
 
@@ -429,7 +457,7 @@ router.patch('/users/:userId/reject', async (req: Request, res: Response, next: 
 
             if (userSocketId) {
                 console.log(`[Admin Reject] Emitting 'userRejected' event to socket ${userSocketId} for user ${userId}`);
-                io.to(userSocketId).emit('userRejected', { 
+                io.to(userSocketId).emit('userRejected', {
                     message: 'Your account registration was rejected and will be deleted. Please contact support if you believe this is an error.'
                 });
                  // Optionally disconnect the socket after sending the message
