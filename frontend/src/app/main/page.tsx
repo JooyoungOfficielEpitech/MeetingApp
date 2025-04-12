@@ -194,22 +194,30 @@ export default function MainPage() {
   // --- Determine Button Text and Disabled state based on API response --- 
   let currentButtonText = 'Loading...';
   let isButtonDisabled = true;
-  let showButton = false;
+  let showButton = false; // Default to false
 
-  if (!isLoadingButtonState && buttonState) {
-      currentButtonText = isAttemptingMatch ? 'Attempting Match...' : buttonState.button_display;
-      isButtonDisabled = !buttonState.active || isAttemptingMatch; // Disable if inactive OR attempting match
-      showButton = true; // Show button if state is loaded
-  } else if (isLoadingButtonState) {
+  if (isLoadingButtonState) {
       currentButtonText = 'Loading...';
       isButtonDisabled = true;
-      showButton = true; // Show loading state
-  } else {
-      // Error state or initial load failed without token
-      currentButtonText = buttonState ? buttonState.button_display : 'Error'; // Display error if available
-      isButtonDisabled = true;
-      showButton = true; // Still show the button in error state (e.g., Login Required)
+      showButton = true; // Show loading indicator
+  } else if (buttonState) {
+      // Check for the specific case to hide the button: Inactive "Start Matching"
+      if (buttonState.button_display === 'Start Matching' && !buttonState.active) {
+          showButton = false; // Hide inactive "Start Matching" button for male users
+          console.log("Hiding button: Inactive Start Matching.");
+      } else {
+          // Show button for all other loaded states (Go to Chat, Active Start Matching, Error states)
+          showButton = true;
+          currentButtonText = isAttemptingMatch ? 'Attempting Match...' : buttonState.button_display;
+          // Disable based on API active state OR if currently attempting a match
+          isButtonDisabled = !buttonState.active || isAttemptingMatch;
+          // Ensure error states remain disabled
+          if (buttonState.button_display === 'Login Required' || buttonState.button_display === 'Error Loading') {
+              isButtonDisabled = true;
+          }
+      }
   }
+  // If initial load fails before buttonState is set, showButton remains false
 
   // --- Add logs before returning JSX ---
   console.log("[MainPage Render] State before render:", {
