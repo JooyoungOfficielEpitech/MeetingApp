@@ -17,8 +17,7 @@ interface ButtonState {
 }
 
 export default function MainPage() {
-  // Slider value: 1 ~ 100 (km) range, initial value 10km
-  const [filterValue, setFilterValue] = useState(10);
+  // Removed filterValue state
   const router = useRouter();
   const socketRef = useRef<Socket | null>(null); // Ref for the temporary socket
   console.log("MainPage: Component rendering"); // Add this log
@@ -232,23 +231,6 @@ export default function MainPage() {
           >
             <UserCircleIcon className="h-6 w-6 text-gray-300" />
           </button>
-        </div>
-
-        {/* Filter Slider and Text */}
-        <div className="mt-4 px-2">
-           <input
-             type="range"
-             min="1" // Min 1km
-             max="100" // Max 100km
-             value={filterValue}
-             onChange={(e) => setFilterValue(parseInt(e.target.value, 10))}
-             className="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-amber-500" // Darker track, Amber accent
-             style={{ touchAction: 'none' }}
-           />
-           {/* Distance display text */}
-           <p className="text-center text-sm text-slate-300 mt-2"> {/* Adjusted text color slightly */}
-             Find matches within <span className={`font-semibold text-amber-400 ${montserrat.className}`}> {filterValue} km</span> {/* Amber accent, Montserrat font */}
-           </p>
         </div>
       </div>
 
