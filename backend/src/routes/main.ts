@@ -64,13 +64,14 @@ interface AuthenticatedRequest extends Request {
  */
 
 // Apply middleware and then the handler
-router.get('/button-state', authenticateToken, (async (req: AuthenticatedRequest, res: Response<ButtonStateResponse>, next: NextFunction) => {
+router.get('/button-state', authenticateToken as express.RequestHandler, (async (req: AuthenticatedRequest, res: Response<ButtonStateResponse>, next: NextFunction) => {
     // Type assertion is less safe, prefer optional chaining if possible
     const userId = req.user?.userId;
 
     if (!userId) {
         // Should be caught by middleware, but included for safety
-        return res.status(401).json({ message: 'Unauthorized: User ID not found' } as any); // Cast to any to bypass strict type check if needed
+        res.status(401).json({ message: 'Unauthorized: User ID not found' } as any);
+        return; // Add explicit return
     }
 
     try {

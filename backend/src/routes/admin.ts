@@ -6,7 +6,8 @@ import jwt from 'jsonwebtoken';
 import fs from 'fs';     // Import fs for file deletion
 import path from 'path'; // Import path for file paths
 // Import the exported io instance from server.ts
-import { io } from '../server'; // Adjust path as needed
+// import { io } from '../server'; // Adjust path as needed -- Incorrect path
+import { io } from '../socket'; // Correct: Import from socket module
 const db = require('../../models'); // Adjust path if needed
 const User = db.User;
 const Match = db.Match; // Import Match model
@@ -14,16 +15,15 @@ const MatchingWaitList = db.MatchingWaitList; // Make sure this is imported
 // Import connectedUsers map from server (adjust path/export method if needed)
 // This assumes connectedUsers is exported from server.ts or a shared module
 // For simplicity, let's assume it's accessible. In a real app, use dependency injection or a shared service.
-import { connectedUsers } from '../server'; // Placeholder - Adjust import based on actual export
-
-// Import JWT_SECRET (assuming it's defined similarly to auth.ts)
-const JWT_SECRET = process.env.JWT_SECRET || 'YOUR_VERY_SECRET_KEY_CHANGE_ME';
+// import { connectedUsers } from '../server'; // Placeholder - Adjust import based on actual export -- Incorrect path
+import { connectedUsers } from '../socket/state'; // Correct: Import from socket state module
+import { JWT_SECRET } from '../config/jwt'; // Import JWT_SECRET from config
 
 const router = express.Router();
 
 // Apply authentication and admin check to all routes in this file
-router.use(authenticateToken);
-router.use(isAdmin);
+router.use(authenticateToken as express.RequestHandler);
+router.use(isAdmin as express.RequestHandler);
 
 /**
  * @swagger
@@ -299,7 +299,7 @@ router.get('/users', async (req: Request, res: Response, next: NextFunction) => 
  *         description: The ID of the user to approve
  *     responses:
  *       200: { description: 'User approved successfully' }
- *       400: { description: 'Invalid user ID' }
+ *       400: { description: 'Invalid user ID or user already active' }
  *       401: { description: 'Authentication token required' }
  *       403: { description: 'Forbidden (not an admin)' }
  *       404: { description: 'User not found' }
@@ -307,8 +307,7 @@ router.get('/users', async (req: Request, res: Response, next: NextFunction) => 
  */
 router.patch('/users/:userId/approve', async (req: Request, res: Response, next: NextFunction) => {
     const userId = req.params.userId;
-    // Use the directly imported io instance
-    const ioInstance = io; 
+    const ioInstance = io; // Use the imported io instance
 
     console.log(`[PATCH /api/admin/users/${userId}/approve] Request received.`);
 
@@ -341,16 +340,15 @@ router.patch('/users/:userId/approve', async (req: Request, res: Response, next:
             status: user.status, // Now 'active'
             gender: user.gender
         };
+        // Use the imported JWT_SECRET
         const newToken = jwt.sign(newPayload, JWT_SECRET, { expiresIn: '1h' });
         // -------------------------------------------
 
         // --- Emit WebSocket event with the NEW token --- 
         let userSocketId: string | null = null;
-        // Check if connectedUsers map is available and is a Map
         if (connectedUsers && connectedUsers instanceof Map) {
             for (const [socketId, connectedUser] of connectedUsers.entries()) {
-                 // Ensure comparison is done correctly (e.g., comparing numbers)
-                 if (connectedUser.userId === parseInt(userId, 10)) { // Parse userId from params
+                 if (connectedUser.userId === parseInt(userId, 10)) {
                     userSocketId = socketId;
                     break;
                 }
@@ -359,17 +357,16 @@ router.patch('/users/:userId/approve', async (req: Request, res: Response, next:
              console.warn('[Admin Approve] connectedUsers map is not available or not a Map.');
         }
 
-        if (userSocketId && ioInstance) { // Check if socketIoInstance is valid
+        if (userSocketId && ioInstance) {
             console.log(`[Admin Approve] Emitting 'userApproved' event with new token to socket ${userSocketId} for user ${userId}`);
             ioInstance.to(userSocketId).emit('userApproved', {
-                message: '계정이 승인되었습니다! 메인 페이지로 이동합니다.', // Message in Korean
-                token: newToken, // Send the new token
-                user: { // Send relevant user info needed by frontend
+                message: '계정이 승인되었습니다! 메인 페이지로 이동합니다.',
+                token: newToken,
+                user: {
                     id: user.id,
                     email: user.email,
                     name: user.name,
-                    status: user.status // 'active'
-                    // Add other fields if needed
+                    status: user.status
                 }
             });
         } else {

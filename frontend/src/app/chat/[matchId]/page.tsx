@@ -241,76 +241,84 @@ function ChatContent() {
         // --- Listen for new incoming messages ---
         newSocket.on('chat message', (message: { senderId: number, text: string, timestamp: number }) => {
              console.log('ChatContent: Received raw message:', message);
-             if (currentUserId !== null) {
+             if (currentUserId !== null && message.senderId !== currentUserId) {
                  const formattedMessage: Message = {
                      senderId: message.senderId,
                      text: message.text,
                      timestamp: message.timestamp, // Expecting milliseconds
-                     sender: message.senderId === currentUserId ? 'me' : 'other',
+                     sender: 'other', // We already know it's not 'me' because of the check
                  };
-                 console.log('ChatContent: Formatted new message:', formattedMessage);
+                 console.log('ChatContent: Formatted new message from opponent:', formattedMessage);
                  setMessages((prevMessages) => [...prevMessages, formattedMessage]);
+             } else if (currentUserId !== null && message.senderId === currentUserId) {
+                 // Log if the sender receives their own message back (shouldn't happen with broadcast)
+                 console.warn("ChatContent: Received own message back from server despite broadcast. Ignoring.", message);
              } else {
                   console.warn("ChatContent: Received message but currentUserId is null.");
              }
         });
 
-         // --- Listen for opponent permanently leaving ---
-         // This event is sent when opponent clicks the permanent leave button
-         newSocket.on('opponent-left-chat', (data?: { userId?: number }) => {
-             console.log(`ChatContent: Opponent left chat permanently (User ID: ${data?.userId || 'Unknown'})`);
-             setNotification('Opponent has left the chat. You can no longer send messages.');
-             setOpponentLeft(true); // Set opponentLeft state to true
-             // Consider disconnecting the socket as the chat is effectively over
-             // if (socketRef.current) {
-             //     socketRef.current.disconnect();
-             // }
-             setIsConnected(false); // Reflect that interaction is no longer possible
+         // --- Listen for opponent leaving the chat ---
+         newSocket.on('opponent-left-chat', (data: { userId: number }) => {
+             console.log(`ChatContent: Opponent left chat permanently (User ID: ${data.userId})`);
+             setNotification('Opponent has left the chat. You can no longer send messages.'); // Use notification instead of error
+             setOpponentLeft(true); // Set opponent left state
+             // DO NOT set isConnected to false here. The socket is still connected to the server.
+             // Optionally disconnect the socket if no further interaction is needed
+             // newSocket.disconnect();
          });
 
-        // --- Listen for General Errors from Backend ---
-        newSocket.on('error', (errorMessage: string) => {
-            console.error(`ChatContent: Received error event from socket: ${errorMessage}`);
-            // Handle specific error messages for redirection
-            if (errorMessage.includes('만료되었거나 유효하지 않은 채팅방입니다') || 
-                errorMessage.includes('상대방이 이미 채팅방을 나갔습니다')) {
-                setError(errorMessage); // Set the error to display briefly
-                alert(errorMessage + "\n\n메인 페이지로 이동합니다."); // Inform the user
-                router.push('/main'); // Redirect to main page
-            } else if (errorMessage.includes('메시지를 보낼 수 없는 방') || errorMessage.includes('비활성화된 채팅방')) {
-                // Errors related to sending messages in inactive/invalid rooms
-                setError(errorMessage);
-                setOpponentLeft(true); // Mark opponent as left to disable input
-            } else {
-                // General errors
-                setError(errorMessage);
+        // --- Listen for forced leave success/error ---
+        const handleForceLeaveSuccess = (data: { matchId: string }) => {
+            console.log(`ChatContent: Successfully left match ${data.matchId}. Disconnecting and redirecting...`);
+            setNotification('You have left the chat room.');
+            // Disconnect socket BEFORE redirecting
+            if (socketRef.current) {
+                socketRef.current.disconnect();
+                socketRef.current = null; // Clear the ref after disconnect
             }
+            router.push('/main');
+        };
+        const handleForceLeaveError = (data: { message: string }) => {
+            console.error(`ChatContent: Error leaving chat: ${data.message}`);
+            setError(`Error leaving chat: ${data.message}`);
+        };
+
+        newSocket.on('force-leave-success', handleForceLeaveSuccess);
+        newSocket.on('force-leave-error', handleForceLeaveError);
+
+        // --- Listen for generic errors from socket ---
+        newSocket.on('error', (errorMessage: string) => {
+             console.error('ChatContent: Received error event from socket:', errorMessage);
+             setError(errorMessage);
+             // Determine if specific errors require disconnecting or redirecting
+             if (errorMessage.includes('비활성화된 채팅방') || errorMessage.includes('Invalid chat room')) {
+                 setOpponentLeft(true); // Mark as effectively ended
+                 setIsConnected(false);
+             }
         });
 
-
-        // --- Cleanup function on component unmount or dependency change ---
+        // --- Cleanup on component unmount or before reconnecting ---
         return () => {
-            console.log("ChatContent: useEffect cleanup - Disconnecting socket and removing listeners.");
+            console.log(`ChatContent: Cleaning up socket connection for matchId: ${matchId}`);
             if (newSocket) {
-                // Remove all listeners attached to this socket instance
                 newSocket.off('connect');
                 newSocket.off('disconnect');
                 newSocket.off('connect_error');
                 newSocket.off('chat-history');
                 newSocket.off('chat message');
                 newSocket.off('opponent-left-chat');
-                newSocket.off('error'); // Ensure generic error listener is also removed
-
-                // Disconnect the socket
-                newSocket.disconnect();
+                newSocket.off('force-leave-success', handleForceLeaveSuccess);
+                newSocket.off('force-leave-error', handleForceLeaveError);
+                newSocket.off('error');
+                if (newSocket.connected) {
+                    newSocket.disconnect();
+                }
             }
-            // Clear the ref to ensure a fresh socket is created next time
             socketRef.current = null;
-            console.log("ChatContent: Socket reference cleared.");
         };
-    // Dependencies: Re-run effect if matchId or currentUserId changes.
-    // Also include router if it's used within the effect for redirects based on errors
-    }, [matchId, currentUserId, router]); // Added router as dependency based on usage
+    // Dependencies for the effect
+    }, [matchId, currentUserId, router]); // Add currentUserId and router to dependencies
 
     // --- Scroll to bottom when messages change ---\
     useEffect(() => {
@@ -358,27 +366,19 @@ function ChatContent() {
          }
     }, [newMessage, isConnected, opponentLeft, matchId, currentUserId]); // Include opponentLeft in dependencies
 
-    // --- Leave Chat Handler (Permanent Leave - Right Icon) ---
+    // --- Handle leaving the chat room permanently ---
     const handleLeaveChat = useCallback(() => {
-        if (matchId) {
+        if (socketRef.current && matchId) {
             console.log(`ChatContent: User clicking PERMANENT LEAVE for room: ${matchId}`);
-             if (socketRef.current && isConnected) {
-                  // Emit the 'force-leave-chat' event to deactivate the match on backend
-                  socketRef.current.emit('force-leave-chat', matchId);
-                  console.log(`ChatContent: Emitted 'force-leave-chat' for match: ${matchId}`);
-             }
-             // Disconnect immediately regardless of server confirmation
-             if (socketRef.current) {
-                 socketRef.current.disconnect();
-                 socketRef.current = null; // Clear the ref
-                 setIsConnected(false); // Update state
-             }
+            // Only emit the event, do not disconnect or redirect here
+            socketRef.current.emit('force-leave-chat', matchId);
+            console.log(`ChatContent: Emitted 'force-leave-chat' for match: ${matchId}`);
+            // setNotification('Leaving chat room...'); // Optional: Indicate action started
         } else {
-             console.warn("ChatContent: Cannot leave chat: matchId is missing.");
+            console.error('Cannot leave chat: Socket not connected or matchId missing.');
+            setError('Cannot leave chat at the moment.');
         }
-        console.log("ChatContent: Redirecting to /main after force leave.");
-        router.push('/main'); // Redirect to main page
-    }, [isConnected, matchId, router]); // Dependencies for leaving
+    }, [matchId]); // Dependency: matchId
 
     // --- Render Logic ---
      // Display loading or critical error before main UI
@@ -419,8 +419,8 @@ function ChatContent() {
                  {/* Right side: Status and Permanent Leave Button */}
                  <div className="flex items-center">
                     {/* Connection Status Indicator - based on isConnected and opponentLeft */}
-                    <span className={`text-xs px-2 py-1 rounded whitespace-nowrap ${isConnected ? (opponentLeft ? 'bg-gray-600 text-gray-200' : 'bg-green-600 text-green-100') : 'bg-red-600 text-red-100'} `}>
-                        {isConnected ? (opponentLeft ? 'Opponent Left' : 'Connected') : 'Disconnected'}
+                    <span className={`text-xs px-2 py-1 rounded whitespace-nowrap ${opponentLeft ? 'bg-gray-600 text-gray-200' : (isConnected ? 'bg-green-600 text-green-100' : 'bg-red-600 text-red-100')} `}>
+                        {opponentLeft ? 'Opponent Left' : (isConnected ? 'Connected' : 'Disconnected')}
                     </span>
                     {/* Permanent Leave Button */}
                     <button

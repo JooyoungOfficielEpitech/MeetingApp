@@ -7,6 +7,8 @@ import multer, { FileFilterCallback } from 'multer'; // Import multer and FileFi
 import path from 'path';     // Import path
 import fs from 'fs';         // Import fs
 import { authenticateToken } from '../middleware/authMiddleware'; // Import authentication middleware
+import passport from 'passport'; // Import passport for Google auth
+import { JWT_SECRET } from '../config/jwt'; // Import JWT_SECRET from config
 // Import Sequelize model (adjust path/import method if needed)
 const db = require('../../models'); // Adjust if models/index.js provides types
 const User = db.User;
@@ -19,8 +21,6 @@ const router = express.Router();
 // interface User {...}
 // const users: User[] = [];
 // ------------------------------------
-
-const JWT_SECRET = process.env.JWT_SECRET || 'YOUR_VERY_SECRET_KEY_CHANGE_ME'; // !! CHANGE THIS !!
 
 // --- Multer Configuration for File Uploads ---
 
@@ -214,7 +214,7 @@ router.post('/signup',
                 status: newUser.status // Should be 'pending_approval' from create
             };
             console.log('Generating JWT for new pending user with payload:', payload); 
-            const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' }); // Use a reasonable expiration
+            const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' }); // Use imported JWT_SECRET
             // ---------------------------------------------
             
             // --- Prepare limited user response (optional, but consistent) ---
@@ -748,7 +748,7 @@ interface AuthenticatedRequest extends Request {
  */
 router.post(
     '/complete-social',
-    authenticateToken,
+    authenticateToken as express.RequestHandler,
     (req: Request, res: Response, next: NextFunction) => { // Use standard Request type here
         console.log(`[complete-social] Authenticated user ID: ${(req as AuthenticatedRequest).user?.userId}`);
         next();
@@ -905,6 +905,135 @@ router.post(
         }
     }
 );
+
+// --- Google Authentication Routes ---
+
+/**
+ * @swagger
+ * /api/auth/google:
+ *   get:
+ *     summary: Initiate Google OAuth 2.0 login flow
+ *     tags: [Authentication]
+ *     responses:
+ *       302:
+ *         description: Redirects to Google for authentication.
+ */
+router.get('/google',
+    passport.authenticate('google', { scope: ['profile', 'email'] })
+);
+
+/**
+ * @swagger
+ * /api/auth/google/callback:
+ *   get:
+ *     summary: Google OAuth 2.0 callback URL
+ *     tags: [Authentication]
+ *     description: >
+ *       Handles the redirect from Google after user authentication.
+ *       If successful and profile complete, redirects to frontend auth callback with JWT.
+ *       If new user or profile incomplete, redirects to frontend profile completion page.
+ *       On failure, redirects to frontend home page with an error query parameter.
+ *     parameters:
+ *       - in: query
+ *         name: code
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: Authorization code from Google.
+ *       - in: query
+ *         name: scope
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: Scopes granted by the user.
+ *     responses:
+ *       302:
+ *         description: >
+ *           Redirects to frontend:
+ *           - `http://localhost:3000/auth/callback?token=<jwt>` on successful login (profile complete).
+ *           - `http://localhost:3000/signup/complete-profile` for new users or incomplete profiles.
+ *           - `http://localhost:3000/?error=<error_message>` on authentication failure.
+ */
+router.get('/google/callback',
+    (req: any, res, next) => { // Logging middleware (optional but helpful)
+        console.log('\n--- Entering /auth/google/callback route ---');
+        console.log('Session ID:', req.sessionID);
+        console.log('Session Data BEFORE authenticate:', JSON.stringify(req.session, null, 2));
+        next();
+    },
+    (req: any, res, next) => { // Custom authentication callback handler
+        passport.authenticate('google', { failureRedirect: 'http://localhost:3000/?error=google_auth_failed' }, // Basic failure redirect
+            async (err: any, user: any, info: any) => {
+                console.log('\n--- Inside /auth/google/callback passport.authenticate ---');
+                console.log('Error:', err);
+                console.log('User object (from strategy done()):', user ? user.toJSON() : user);
+                console.log('Info:', info);
+                console.log('Session Data IN callback:', JSON.stringify(req.session, null, 2));
+
+                if (err) {
+                    console.error('Authentication Error from Google strategy:', err);
+                    // Redirect with a generic error, or use err.message if available and safe
+                    return res.redirect(`http://localhost:3000/?error=google_auth_error`);
+                }
+
+                if (user) {
+                    // --- Existing User Authenticated by Strategy --- 
+                    console.log('Google Callback: Existing user authenticated.', user.toJSON());
+
+                    // Check if essential profile info is missing
+                    // Adjust this check based on what defines a "complete" profile in your app
+                    const isProfileComplete = user.gender && ['male', 'female', 'other'].includes(user.gender);
+
+                    if (isProfileComplete) {
+                        // Profile complete: Generate JWT, include status, redirect to frontend auth callback
+                        const payload = {
+                            userId: user.id,
+                            email: user.email,
+                            status: user.status // Include status
+                        };
+                        const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
+                        console.log('Profile complete. Redirecting to /auth/callback with token containing status:', payload.status);
+                        return res.redirect(`http://localhost:3000/auth/callback?token=${token}`);
+                    } else {
+                        // Profile incomplete: Redirect to complete profile page (use session)
+                        console.log('Profile incomplete. Storing pending info and redirecting to /signup/complete-profile.');
+                        // Ensure pendingSocialProfile is set correctly (strategy should have done this)
+                        if (!req.session.pendingSocialProfile) {
+                            req.session.pendingSocialProfile = {
+                                provider: 'google', // or user.provider if available
+                                id: user.googleId, // Assuming googleId field exists
+                                email: user.email,
+                                name: user.name, // Include existing name if available
+                            };
+                        }
+                        // Save session before redirecting
+                        req.session.save((saveErr: any) => {
+                            if (saveErr) {
+                                console.error("Session save error before redirecting incomplete existing user:", saveErr);
+                                return res.redirect('http://localhost:3000/?error=session_save_error');
+                            }
+                            console.log('Session saved for incomplete existing user. Redirecting...');
+                            return res.redirect(`http://localhost:3000/signup/complete-profile`); // Redirect without token
+                        });
+                    }
+                } else if (req.session && req.session.pendingSocialProfile && req.session.pendingSocialProfile.provider === 'google') {
+                    // --- New User via Google (strategy called done(null, false)) --- 
+                    console.log('Google Callback: New user identified by session. Redirecting to complete profile.');
+                    // Session already has the data, just redirect
+                    // NOTE: Session *should* have been saved by the strategy before calling done(null, false)
+                    // If not, the strategy needs adjustment, or save it here.
+                    // Assuming strategy handles saving:
+                    return res.redirect('http://localhost:3000/signup/complete-profile');
+                } else {
+                    // --- Authentication Failed or Unexpected State ---
+                    console.error('Google Callback: Unexpected state or user denied access. User:', user, 'Session:', req.session);
+                    const failureMsg = info?.message || 'authentication_failed_unexpected';
+                    return res.redirect(`http://localhost:3000/?error=${encodeURIComponent(failureMsg)}`);
+                }
+            })(req, res, next); // *** Important: Invoke the middleware returned by passport.authenticate ***
+    }
+);
+// --- End Google Authentication Routes ---
 
 // ... (Keep other routes like /verify-token, etc. if they exist) ...
 
