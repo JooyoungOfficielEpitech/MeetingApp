@@ -333,6 +333,27 @@ router.patch('/users/:userId/approve', async (req: Request, res: Response, next:
         await user.save();
         console.log(`[Admin Approve] User ${userId} status updated to 'active'.`);
 
+        // --- Add male user to waitlist UPON APPROVAL --- 
+        if (user.gender === 'male') {
+            try {
+                // Use findOrCreate to prevent duplicates if approval is somehow triggered multiple times
+                const [waitlistEntry, created] = await MatchingWaitList.findOrCreate({
+                    where: { userId: user.id },
+                    defaults: { userId: user.id }
+                });
+                if (created) {
+                    console.log(`[Admin Approve] Male user ${userId} added to MatchingWaitList.`);
+                } else {
+                    console.log(`[Admin Approve] Male user ${userId} was already in MatchingWaitList.`);
+                }
+            } catch (waitlistError: any) {
+                console.error(`[Admin Approve] Error adding user ${userId} to MatchingWaitList:`, waitlistError);
+                // Decide if the approval should fail if waitlist add fails
+                // For now, log and continue
+            }
+        }
+        // -------------------------------------------
+
         // --- Generate NEW JWT with ACTIVE status --- 
         const newPayload = {
             userId: user.id,
@@ -618,6 +639,26 @@ router.delete('/users/:userId', async (req: Request, res: Response, next: NextFu
             }
         });
         // --- End File Deletion ---
+
+        // --- Delete Associated Matches ---
+        console.log(`[Admin Delete] Deleting matches associated with user ${userId}.`);
+        try {
+            const deletedMatchesCount = await Match.destroy({
+                where: {
+                    [Op.or]: [
+                        { user1Id: userId },
+                        { user2Id: userId }
+                    ]
+                }
+            });
+            console.log(`[Admin Delete] Deleted ${deletedMatchesCount} matches associated with user ${userId}.`);
+        } catch (matchError) {
+            console.error(`[Admin Delete] Error deleting matches for user ${userId}:`, matchError);
+            // Decide if you want to stop the user deletion process if match deletion fails
+            // For now, we'll log the error and continue, but you might want to throw or return
+            // throw new Error('Failed to delete associated matches'); // Example: Stop deletion
+        }
+        // --- End Match Deletion ---
 
         // --- Delete User Record Permanently --- 
         await user.destroy({ force: true }); // Use force: true to bypass paranoid mode

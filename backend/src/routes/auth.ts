@@ -6,6 +6,21 @@ import { Op } from 'sequelize'; // Import Op for OR query
 import multer, { FileFilterCallback } from 'multer'; // Import multer and FileFilterCallback
 import path from 'path';     // Import path
 import fs from 'fs';         // Import fs
+// --- Augment Express Session Type --- 
+import 'express-session';
+
+declare module 'express-session' {
+  interface SessionData {
+    pendingSocialProfile?: {
+      id: string; // Google ID
+      email: string;
+      name?: string;
+      gender?: string;
+      provider?: string; 
+    } | null; // Allow null when cleared
+  }
+}
+// ------------------------------------
 import { authenticateToken } from '../middleware/authMiddleware'; // Import authentication middleware
 import passport from 'passport'; // Import passport for Google auth
 import { JWT_SECRET } from '../config/jwt'; // Import JWT_SECRET from config
@@ -16,6 +31,43 @@ const Match = db.Match; // Import Match model
 const MatchingWaitList = db.MatchingWaitList; // MatchingWaitList 모델 import
 
 const router = express.Router();
+
+// --- Moved Route for Social Login Profile Completion --- 
+
+/**
+ * @swagger
+ * /api/auth/session/profile-data:
+ *   get:
+ *     summary: Get pending social profile data from session
+ *     tags: [Authentication]
+ *     description: Retrieves temporary profile data stored in session during social sign-up flow.
+ *     responses:
+ *       200:
+ *         description: Pending profile data retrieved successfully.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 email: { type: string, format: email }
+ *                 name: { type: string }
+ *       401:
+ *         description: Unauthorized (no session or pending profile).
+ *       500:
+ *         description: Server error.
+ */
+router.get('/session/profile-data', (req: any, res: Response) => {
+    console.log('[GET /session/profile-data] Session check:', req.session?.pendingSocialProfile);
+    if (req.session && req.session.pendingSocialProfile) {
+        // Only return non-sensitive data needed for the form pre-fill
+        const { email, name, gender } = req.session.pendingSocialProfile;
+        res.status(200).json({ email, name, gender });
+    } else {
+        // If no pending data, maybe the user came here directly or session expired
+        res.status(401).json({ message: 'No pending profile data found in session.' });
+    }
+});
+// --- End Moved Route ---
 
 // --- Remove Mock User Data Store ---
 // interface User {...}
@@ -59,14 +111,16 @@ const storage = multer.diskStorage({
          }
         cb(null, uploadPath);
     },
-    filename: (req: Request, file: Express.Multer.File, cb: FileNameCallback) => {
-        // Use userId (from token), fieldname, timestamp, and original extension for unique filename
-        // Ensure req.user exists via authenticateToken middleware before this runs
-        const userId = (req as any).user?.userId || 'unknown'; // Get userId from authenticated request
+    filename: (req: any, file: Express.Multer.File, cb: FileNameCallback) => {
+        // Use identifier from session instead of req.user.userId
+        // Ensure session middleware runs before multer for this route
+        const identifier = req.session?.pendingSocialProfile?.id || req.session?.pendingSocialProfile?.email || 'unknown-social-user';
+        const safeIdentifier = String(identifier).replace(/[^a-zA-Z0-9_\-]/g, '_'); // Sanitize identifier
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
         const extension = path.extname(file.originalname);
-        const filename = `${userId}-${file.fieldname}-${uniqueSuffix}${extension}`;
-        console.log(`[Multer] Generating filename: ${filename} for user: ${userId}`);
+        // Include fieldname for clarity
+        const filename = `${safeIdentifier}-${file.fieldname}-${uniqueSuffix}${extension}`;
+        console.log(`[Multer] Generating filename: ${filename} for social user: ${identifier}`);
         cb(null, filename);
     }
 });
@@ -191,21 +245,6 @@ router.post('/signup',
                 // dob: null, age: null, etc. based on your model definition
             });
             console.log('New user created (signup):', newUser.toJSON());
-
-            // --- Add male user to waitlist (Keep this logic) --- 
-            if (newUser.gender === 'male') {
-                try {
-                    await MatchingWaitList.create({ userId: newUser.id });
-                    console.log(`Male user ${newUser.id} added to MatchingWaitList.`);
-                } catch (waitlistError: any) {
-                    if (waitlistError.name === 'SequelizeUniqueConstraintError') {
-                        console.warn(`User ${newUser.id} already in MatchingWaitList (signup).`);
-                    } else {
-                        console.error(`Error adding user ${newUser.id} to MatchingWaitList:`, waitlistError);
-                    }
-                }
-            }
-            // ------------------------------------
 
             // --- Generate JWT for the new pending user --- 
             const payload = { 
@@ -416,40 +455,6 @@ router.post('/login',
 );
 
 // --- Routes for Social Login Profile Completion --- 
-
-/**
- * @swagger
- * /api/auth/session/profile-data:
- *   get:
- *     summary: Get pending social profile data from session
- *     tags: [Authentication]
- *     description: Retrieves temporary profile data stored in session during social sign-up flow.
- *     responses:
- *       200:
- *         description: Pending profile data retrieved successfully.
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 email: { type: string, format: email }
- *                 name: { type: string }
- *       401:
- *         description: Unauthorized (no session or pending profile).
- *       500:
- *         description: Server error.
- */
-router.get('/session/profile-data', (req: any, res: Response) => {
-    console.log('[GET /session/profile-data] Session check:', req.session?.pendingSocialProfile);
-    if (req.session && req.session.pendingSocialProfile) {
-        // Only return non-sensitive data needed for the form pre-fill
-        const { email, name, gender } = req.session.pendingSocialProfile;
-        res.status(200).json({ email, name, gender });
-    } else {
-        // If no pending data, maybe the user came here directly or session expired
-        res.status(401).json({ message: 'No pending profile data found in session.' });
-    }
-});
 
 /**
  * @swagger
@@ -748,32 +753,41 @@ interface AuthenticatedRequest extends Request {
  */
 router.post(
     '/complete-social',
-    authenticateToken as express.RequestHandler,
-    (req: Request, res: Response, next: NextFunction) => { // Use standard Request type here
-        console.log(`[complete-social] Authenticated user ID: ${(req as AuthenticatedRequest).user?.userId}`);
-        next();
+    (req: Request, res: Response, next: NextFunction) => { 
+        // Middleware to check if session exists before multer tries to access it
+        if (!req.session || !req.session.pendingSocialProfile) {
+             console.error('[complete-social Pre-Multer Check] Error: Session or pendingSocialProfile missing.');
+             res.status(401).json({ message: 'Session expired or invalid. Please try social login again.' });
+             return; // ★ Add explicit return here
+         }
+        console.log(`[complete-social Pre-Multer Check] Session found for social profile completion.`);
+        next(); // Proceed to multer
     },
-    upload.fields([ // multer middleware
+    upload.fields([ // Apply multer AFTER session check
         { name: 'profilePictures', maxCount: 3 },
         { name: 'businessCard', maxCount: 1 }
     ]),
-    async (req: Request, res: Response, next: NextFunction): Promise<void> => { // Use standard Request type here
-        // Use the AuthenticatedRequest interface for type safety within the handler
-        const authReq = req as AuthenticatedRequest;
-        const userId = authReq.user?.userId;
-        const files = authReq.files;
-
-        console.log(`[POST /api/auth/complete-social] Processing request for user ID: ${userId}`);
-        console.log('Body:', authReq.body);
-
-        if (!userId) {
-            console.error('[complete-social] Error: userId missing after authenticateToken.');
-            res.status(401).json({ message: 'Authentication failed: User ID not found.' });
-            return;
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+        // Cast req to reuse AuthenticatedRequest type for file structure, but user field won't exist
+        const socialReq = req as AuthenticatedRequest; 
+        const files = socialReq.files;
+        
+        // --- Get data from SESSION, not req.user ---
+        const pendingProfile = req.session?.pendingSocialProfile;
+        if (!pendingProfile || !pendingProfile.id || !pendingProfile.email) { // Check essential session data
+             console.error('[complete-social Handler] Error: Session or essential pending profile data missing after multer.');
+             // Clean up any files multer might have saved
+             // cleanupFiles(); // Define or call cleanup logic if needed
+             res.status(401).json({ message: 'Session expired or invalid after file upload. Please try social login again.' });
+             return;
         }
+        const { id: googleId, email: sessionEmail, name: sessionName } = pendingProfile;
+        console.log(`[POST /api/auth/complete-social] Processing request for social user: ${sessionEmail} (Google ID: ${googleId})`);
+        // ----------------------------------------------
 
+        // --- Define cleanup function locally or import it ---
         const cleanupFiles = () => {
-            console.warn(`[complete-social] Cleaning up uploaded files for failed request (User ID: ${userId}).`);
+            console.warn(`[complete-social] Cleaning up uploaded files for failed request (Social User: ${sessionEmail}).`);
              if (files?.profilePictures) {
                  files.profilePictures.forEach(f => {
                      try { fs.unlinkSync(f.path); console.log(`Deleted: ${f.path}`); } catch (e) { console.error(`Error deleting ${f.path}:`, e); }
@@ -785,11 +799,11 @@ router.post(
                  });
              }
         };
+        // ---------------------------------------------------
 
-        // --- Validation ---
-        const { age, height, mbti, gender } = authReq.body;
+        // --- Validation (use body data) ---
+        const { age, height, mbti, gender } = socialReq.body;
         const errors: string[] = [];
-
         if (!age || isNaN(parseInt(age)) || parseInt(age) < 19) errors.push('Valid age (19+) is required.');
         if (!height || isNaN(parseInt(height)) || parseInt(height) < 100) errors.push('Valid height (>= 100cm) is required.');
         if (!mbti || !/^[EI][SN][TF][JP]$/i.test(mbti)) errors.push('Valid MBTI (4 letters, e.g., INFP) is required.');
@@ -807,7 +821,7 @@ router.post(
         }
 
         if (errors.length > 0) {
-             console.warn(`[complete-social] Validation failed for user ${userId}:`, errors);
+             console.warn(`[complete-social] Validation failed for social user ${sessionEmail}:`, errors);
              cleanupFiles();
              res.status(400).json({ message: 'Validation failed', errors });
              return;
@@ -815,90 +829,93 @@ router.post(
         // --- End Validation ---
 
         try {
-            const user = await User.findByPk(userId);
-
-            if (!user) {
-                console.error(`[complete-social] Error: User not found for ID: ${userId}`);
-                cleanupFiles();
-                res.status(404).json({ message: 'User associated with this token not found.' });
-                return;
+            // --- Check if user already exists (using session email/googleId) ---
+            const existingUser = await User.findOne({ where: { [Op.or]: [{ email: sessionEmail }, { googleId: googleId }] } });
+            if (existingUser) {
+                 console.warn(`[complete-social] Conflict: User already exists with email ${sessionEmail} or googleId ${googleId}.`);
+                 cleanupFiles();
+                 // Clear session data as the user exists
+                 if(req.session) req.session.pendingSocialProfile = null;
+                 res.status(409).json({ message: 'User with this email or social ID already exists.' });
+                 return;
             }
+            // ---------------------------------------------------------------------
 
-            // Allow profile update even if already active
-            if (user.status === 'active') {
-                 console.log(`[complete-social] User ${userId} profile already active, proceeding with update...`);
-            }
-
-            // Prepare file paths (ensure they are web-accessible, e.g., /uploads/...)
-            // Add checks to satisfy TypeScript, even though validation should guarantee existence here
-        if (!files || !files.profilePictures || files.profilePictures.length === 0 || !files.businessCard || files.businessCard.length === 0) {
-                 // This block should technically not be reached due to the validation checks above
-                 console.error('[complete-social] Internal Server Error: File objects are missing after validation passed.');
-                 cleanupFiles(); // Clean up any potentially partially uploaded files
+            // Prepare file paths
+            if (!files || !files.profilePictures || files.profilePictures.length === 0 || !files.businessCard || files.businessCard.length === 0) {
+                 console.error('[complete-social] Internal Server Error: File objects missing after validation.');
+                 cleanupFiles();
                  res.status(500).json({ message: 'Internal server error processing uploaded files.' });
-                 return; // Add explicit return; after sending response
+                 return;
             }
-
-            // Now TypeScript knows files, files.profilePictures, and files.businessCard exist and are not empty
             const profileImageUrls = files.profilePictures.map(file =>
                 `/uploads/profiles/${path.basename(file.path)}`
             );
             const businessCardImageUrl = `/uploads/business_cards/${path.basename(files.businessCard[0].path)}`;
 
-            // Update user record
-            user.age = parseInt(age);
-            user.height = parseInt(height);
-            user.mbti = mbti.toUpperCase();
-            user.gender = gender.toLowerCase();
-            user.profileImageUrls = profileImageUrls;
-            user.businessCardImageUrl = businessCardImageUrl;
-            // --- Set status to pending approval ---
-            user.status = 'pending_approval'; // Require admin approval after profile completion
-            user.occupation = false; // Set occupation to false until approved
-            // -------------------------------------
+            // --- Create NEW user record --- 
+            const newUser = await User.create({
+                googleId: googleId,
+                email: sessionEmail,
+                name: sessionName, // Use name from session
+                age: parseInt(age),
+                height: parseInt(height),
+                mbti: mbti.toUpperCase(),
+                gender: gender.toLowerCase(),
+                profileImageUrls: profileImageUrls,
+                businessCardImageUrl: businessCardImageUrl,
+                status: 'pending_approval', // Require admin approval
+                occupation: false, 
+                // passwordHash will be null
+            });
+            console.log(`[complete-social] New user ${newUser.id} created via social completion, status set to pending_approval.`);
+            // -------------------------------
 
-            await user.save();
-            console.log(`[complete-social] User ${userId} profile completed, status set to pending_approval.`);
+            // --- Clear pending profile from session --- 
+            if (req.session) {
+                 req.session.pendingSocialProfile = null;
+                 // Save session explicitly if needed, although often handled by middleware
+                 req.session.save(saveErr => {
+                      if (saveErr) console.error('[complete-social] Error saving session after clearing pending profile:', saveErr);
+                 });
+            }
+            // ------------------------------------------
 
-            // --- Generate NEW token with pending_approval status ---
+            // --- Generate NEW token with pending_approval status --- 
             const payload = {
-                userId: user.id,
-                email: user.email,
-                status: user.status, // Should be 'pending_approval'
-                gender: user.gender
+                userId: newUser.id, 
+                email: newUser.email,
+                status: newUser.status, // Should be 'pending_approval'
+                gender: newUser.gender
             };
             const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
             // --------------------------------------------------------------
 
-            // Prepare user response (include the pending status)
+            // Prepare user response
             const userResponse = {
-                 id: user.id,
-                 email: user.email,
-                 name: user.name,
-                 gender: user.gender,
-                 age: user.age,
-                 height: user.height,
-                 mbti: user.mbti,
-                 profileImageUrls: user.profileImageUrls,
-                 businessCardImageUrl: user.businessCardImageUrl,
-                 status: user.status // Send 'pending_approval' status
+                 id: newUser.id, email: newUser.email, name: newUser.name,
+                 gender: newUser.gender, age: newUser.age, height: newUser.height,
+                 mbti: newUser.mbti, profileImageUrls: newUser.profileImageUrls,
+                 businessCardImageUrl: newUser.businessCardImageUrl, status: newUser.status
             };
 
             // Send success response
-            res.status(200).json({
-                message: 'Profile information submitted successfully. Waiting for administrator approval.', // Update message
+            res.status(200).json({ // Use 200 OK as user is created but pending
+                message: 'Profile information submitted successfully. Waiting for administrator approval.',
                 token: token,
                 user: userResponse
             });
 
         } catch (error: any) {
-             console.error(`[POST /api/auth/complete-social] Error processing profile completion for user ${userId}:`, error);
-             cleanupFiles();
+             console.error(`[POST /api/auth/complete-social] Error processing profile completion for social user ${sessionEmail}:`, error);
+             cleanupFiles(); 
+              // Clear session on error too?
+              if(req.session) req.session.pendingSocialProfile = null;
 
             if (error.name === 'SequelizeValidationError') {
                 res.status(400).json({ message: 'Database validation failed.', errors: error.errors?.map((e:any) => e.message) });
             } else if (error.name === 'SequelizeDatabaseError') {
-                 res.status(500).json({ message: 'Database error during profile update.' });
+                 res.status(500).json({ message: 'Database error during user creation.' });
             } else {
                  next(error);
             }

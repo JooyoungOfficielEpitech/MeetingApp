@@ -33,7 +33,7 @@ function AuthStatusRedirect({ children }: { children: React.ReactNode }) {
     console.log(`[Layout Check] Path: ${pathname}, Token: ${!!authToken}`);
 
     // Define paths accessible without login
-    const publicPaths = ['/', '/signup', '/auth/callback', '/auth/pending-approval']; // Added pending-approval
+    const publicPaths = ['/', '/signup', '/auth/callback', '/auth/pending-approval', '/signup/complete-profile']; // Added pending-approval and complete-profile
     const isPublicPath = publicPaths.includes(pathname);
 
     // If user is not logged in and trying to access a non-public page, redirect to login

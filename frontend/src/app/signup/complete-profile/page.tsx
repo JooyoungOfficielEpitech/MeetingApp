@@ -7,6 +7,9 @@ import { UserIcon, CakeIcon, ArrowsUpDownIcon, TagIcon, PhotoIcon, Identificatio
 import { Montserrat, Inter } from 'next/font/google';
 // Import axiosInstance
 import axiosInstance from '@/utils/axiosInstance'; // Ensure this path is correct for your project structure
+// --- axios import 추가 ---
+import axios from 'axios'; // Assuming standard axios is available
+// -----------------------
 
 // Initialize fonts (same as login page)
 const montserrat = Montserrat({ subsets: ['latin'], weight: ['700', '800'] });
@@ -55,58 +58,59 @@ export default function CompleteProfilePage() {
     const [businessCardPreview, setBusinessCardPreview] = useState<string | null>(null);
 
     useEffect(() => {
-        // Fetch current user's basic data using JWT
-        const fetchUserData = async () => {
+        // Fetch temporary profile data from session
+        const fetchSessionData = async () => {
             setIsLoading(true);
             setError(null);
             try {
-                // Use axiosInstance which includes the JWT token
-                const response = await axiosInstance.get<ProfileDataResponse>('/api/profile/me'); // Use /api/profile/me endpoint
+                // Use a standard axios instance or configure axiosInstance to NOT send token for this request
+                // Assuming standard axios for session endpoint
+                const response = await axios.get<ProfileDataResponse>(
+                    'http://localhost:3001/api/auth/session/profile-data', // ★ 백엔드 전체 URL 명시
+                    { withCredentials: true } // ★ 세션 쿠키 전송 옵션 추가
+                ); 
 
                 const data = response.data;
-                console.log('[Complete Profile] Fetched user data:', data);
+                console.log('[Complete Profile] Fetched session profile data:', data);
+
+                // --- 세션 데이터 유효성 검사 및 상태 설정 ---
+                if (!data || !data.email) { // 이메일은 필수값이라고 가정
+                    console.error('[Complete Profile] Invalid or missing session data.');
+                    setError('세션 정보가 유효하지 않습니다. 다시 Google 로그인을 시도해주세요.');
+                     // 세션 데이터 없으면 진행 불가, 로그인 페이지로 리디렉션
+                    router.replace('/');
+                    return;
+                }
+                // ---------------------------------------
+
                 setEmail(data.email || '');
                 setName(data.name || '');
-                setGender(data.gender || ''); // Pre-fill gender if available from basic profile
-                // Pre-fill other fields if they are returned by /api/profile/me and available
+                setGender(data.gender || ''); // 세션에 성별 정보가 있다면 미리 채움
 
             } catch (err: any) {
-                console.error("Failed to fetch user data for profile completion:", err);
-                let errorMessage = '사용자 정보를 불러오는 중 오류가 발생했습니다.';
-                 if (err.response?.status === 401) {
-                     // A 401 here means the token is invalid or missing, redirecting to login is appropriate
-                     errorMessage = '인증 정보가 유효하지 않습니다. 다시 로그인해주세요.';
-                     // Clear potentially invalid token before redirecting
-                     localStorage.removeItem('authToken');
-                     localStorage.removeItem('userStatus'); 
-                     router.replace('/'); // Redirect to login
-                     return; // Stop further processing
-                 } else if (err.response?.status === 404) {
-                    // User might have been deleted between token issuance and now?
-                     errorMessage = '사용자를 찾을 수 없습니다.';
-                 } else if (err.response) {
-                     errorMessage = err.response.data?.message || `사용자 정보 로딩 실패 (Status: ${err.response.status})`;
-                 } else if (err.request) {
-                    errorMessage = '서버 연결 실패. 네트워크를 확인해주세요.';
-                 } else {
-                     errorMessage = err.message || errorMessage;
-                 }
+                console.error("Failed to fetch session profile data:", err);
+                let errorMessage = '임시 프로필 정보를 불러오는 중 오류가 발생했습니다.';
+                if (err.response?.status === 401) {
+                    // 세션이 없거나 만료된 경우
+                    errorMessage = '세션이 만료되었거나 유효하지 않습니다. 다시 Google 로그인을 시도해주세요.';
+                    router.replace('/'); // 로그인 페이지로 리디렉션
+                    return;
+                } else if (err.response) {
+                    errorMessage = err.response.data?.message || `세션 데이터 로딩 실패 (Status: ${err.response.status})`;
+                } else if (err.request) {
+                   errorMessage = '서버 연결 실패. 네트워크를 확인해주세요.';
+                } else {
+                    errorMessage = err.message || errorMessage;
+                }
                 setError(errorMessage);
-                 // If a critical error other than 401 occurs, consider logging out or showing error
-                 // For now, we just show the error message on the page.
+                // 오류 발생 시 로딩 상태는 false로 유지
             } finally {
                 setIsLoading(false);
             }
         };
 
-        // Check if token exists before fetching. If not, redirect to login.
-        const token = localStorage.getItem('authToken');
-        if (!token) {
-            console.log('[Complete Profile] No auth token found, redirecting to login.');
-            router.replace('/');
-        } else {
-            fetchUserData();
-        }
+        // 페이지 로드 시 세션 데이터 가져오기 실행
+        fetchSessionData();
 
     }, [router]);
 
@@ -251,8 +255,12 @@ export default function CompleteProfilePage() {
         console.log('Submitting profile completion with FormData...');
 
         try {
-            // Use axiosInstance and specify response type
-            const response = await axiosInstance.post<CompleteSocialResponse>('/api/auth/complete-social', formData);
+            // Use standard axios with credentials, not axiosInstance (token-based)
+            const response = await axios.post<CompleteSocialResponse>(
+                'http://localhost:3001/api/auth/complete-social', // ★ 백엔드 전체 URL
+                 formData, 
+                 { withCredentials: true } // ★ 세션 쿠키 전송
+             );
 
             const data = response.data; // Now data has the type CompleteSocialResponse
             console.log('Response from /complete-social:', data);
