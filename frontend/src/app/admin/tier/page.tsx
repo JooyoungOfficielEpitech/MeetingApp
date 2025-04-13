@@ -10,19 +10,42 @@ interface User {
     id: number;
     name: string;
     email: string;
-    gender: 'male' | 'female' | null;
-    status: 'pending_approval' | 'active' | 'rejected';
+    gender: 'male' | 'female' | 'other' | null; // Allow other gender
+    status: 'pending_approval' | 'active' | 'rejected' | 'suspended'; // Add suspended status
     createdAt: string;
-    // Add other relevant fields like tier, profile picture url, etc.
-    profileImageUrl?: string;
+    updatedAt?: string; // Add updatedAt if available
+    // Add detailed fields
+    age?: number | null;
+    height?: number | null;
+    mbti?: string | null;
+    profileImageUrls?: string[] | null; // Array of strings
+    businessCardImageUrl?: string | null;
+    occupation?: string | boolean | null; // Depending on how you store it
+    // Keep existing profileImageUrl for card view if needed, or remove if using profileImageUrls[0]
+    profileImageUrl?: string; 
 }
+
+// --- Define response type for the user list endpoint --- 
+interface UserListResponse {
+    users: User[];
+    totalPages: number;
+    currentPage: number;
+    totalCount: number;
+}
+// --- End response type definition ---
+
+// Define interface for the detailed user response (can be same as User if findByPk returns all)
+// type DetailedUser = User; // Or define separately if structure differs significantly
 
 // Basic Modal component (replace with your UI library's modal if available)
 const Modal = ({ isOpen, onClose, children }: { isOpen: boolean; onClose: () => void; children: React.ReactNode }) => {
     if (!isOpen) return null;
     return (
         <div className={styles.modalOverlay}>
-            <div className={styles.modalContent}>
+            <div 
+                className={styles.modalContent} 
+                style={{ maxHeight: '85vh', overflowY: 'auto' }}
+            >
                 <button onClick={onClose} className={styles.closeButton}>&times;</button>
                 {children}
             </div>
@@ -34,7 +57,13 @@ const AdminTierPage: React.FC = () => {
     const [users, setUsers] = useState<User[]>([]);
     const [isLoading, setIsLoading] = useState<boolean>(true);
     const [error, setError] = useState<string | null>(null);
+    // State for the user selected in the list (basic info for modal header/actions)
     const [selectedUser, setSelectedUser] = useState<User | null>(null);
+    // State for the detailed user data fetched when modal opens
+    const [detailedUser, setDetailedUser] = useState<User | null>(null); 
+    const [isLoadingDetails, setIsLoadingDetails] = useState<boolean>(false);
+    const [detailError, setDetailError] = useState<string | null>(null);
+    // --- End new state variables ---
     const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
     const [page, setPage] = useState(1);
     const [totalPages, setTotalPages] = useState(1);
@@ -49,18 +78,19 @@ const AdminTierPage: React.FC = () => {
         setError(null);
         console.log(`[Admin Tier] Fetching users for page ${currentPage}...`);
         try {
-            // Call the updated endpoint, no status filter by default (fetches non-rejected)
-            const response = await axiosInstance.get('/api/admin/users', {
+            // Use the defined UserListResponse type for the GET request
+            const response = await axiosInstance.get<UserListResponse>('/api/admin/users', { // Specify response type
                 params: {
                     page: currentPage,
                     limit: 10 // Or your preferred limit
                 }
             });
             console.log('[Admin Tier] Users fetched:', response.data);
+            // Now response.data is typed as UserListResponse
             setUsers(response.data.users || []);
             setTotalPages(response.data.totalPages || 1);
             setTotalCount(response.data.totalCount || 0);
-            setPage(currentPage);
+            setPage(currentPage); // Set current page based on request parameter
         } catch (err: any) {
             console.error('[Admin Tier] Error fetching users:', err);
             setError(err.response?.data?.message || 'Failed to fetch users. Please try again.');
@@ -77,15 +107,31 @@ const AdminTierPage: React.FC = () => {
         fetchUsers(page);
     }, [fetchUsers, page]); // Fetch users on initial load and when page changes
 
-    const handleCardClick = (user: User) => {
+    const handleCardClick = async (user: User) => {
         setSelectedUser(user);
         setIsModalOpen(true);
-        console.log(`[Admin Tier] User card clicked:`, user);
+        setIsLoadingDetails(true);
+        setDetailError(null);
+        setDetailedUser(null);
+        console.log(`[Admin Tier] User card clicked, fetching details for user ID: ${user.id}`);
+
+        try {
+            const response = await axiosInstance.get<User>(`/api/admin/users/${user.id}`);
+            console.log(`[Admin Tier] Detailed user data fetched for ${user.id}:`, response.data);
+            setDetailedUser(response.data);
+        } catch (err: any) {
+            console.error(`[Admin Tier] Error fetching details for user ${user.id}:`, err);
+            setDetailError(err.response?.data?.message || 'Failed to load user details.');
+        } finally {
+            setIsLoadingDetails(false);
+        }
     };
 
     const handleCloseModal = () => {
         setIsModalOpen(false);
         setSelectedUser(null);
+        setDetailedUser(null);
+        setDetailError(null);
         console.log('[Admin Tier] Modal closed.');
     };
 
@@ -113,24 +159,26 @@ const AdminTierPage: React.FC = () => {
     };
 
     const handleReject = async (userId: number) => {
-        if (!confirm('Are you sure you want to reject this user? This action might be irreversible depending on setup.')) return;
-        console.log(`[Admin Tier] Attempting to reject user ${userId}`);
+        if (!confirm('정말로 이 사용자를 영구적으로 삭제하시겠습니까? 이 작업은 되돌릴 수 없으며, 사용자의 모든 데이터와 파일이 삭제됩니다.')) return; // Confirmation message update
+        console.log(`[Admin Tier] Attempting to PERMANENTLY DELETE user ${userId}`);
         if (isProcessingAction) return;
         setIsProcessingAction(true);
         setError(null); // Clear previous errors
+        setDetailError(null); // Clear detail error as well
         try {
-            await axiosInstance.patch(`/api/admin/users/${userId}/reject`);
-            console.log(`[Admin Tier] User ${userId} rejected successfully.`);
-            alert('User rejected successfully!');
-            // Refresh the user list to reflect the change (rejected user will disappear)
+            // Call the DELETE endpoint for permanent deletion
+            await axiosInstance.delete(`/api/admin/users/${userId}`); 
+            console.log(`[Admin Tier] User ${userId} permanently deleted successfully.`);
+            alert('사용자 정보 및 관련 파일이 영구적으로 삭제되었습니다.'); // Updated success message
+            // Refresh the user list to reflect the change (deleted user will disappear)
             fetchUsers(page); // Refetch the current page
             handleCloseModal(); // Close modal after action
         } catch (err: any) {
-            console.error(`[Admin Tier] Error rejecting user ${userId}:`, err);
-            const errorMsg = err.response?.data?.message || 'Failed to reject user.';
-            setError(errorMsg);
-            alert(`Error: ${errorMsg}`); // Show error to admin
-            // Keep modal open on error?
+            console.error(`[Admin Tier] Error permanently deleting user ${userId}:`, err);
+            const errorMsg = err.response?.data?.message || '사용자 삭제 중 오류가 발생했습니다.'; // Updated error message
+            // Set error in the modal instead of alert?
+            setDetailError(errorMsg); // Show error within the modal
+            // alert(`Error: ${errorMsg}`); // Remove alert
         } finally {
             setIsProcessingAction(false);
         }
@@ -194,40 +242,88 @@ const AdminTierPage: React.FC = () => {
                     <Modal isOpen={isModalOpen} onClose={handleCloseModal}>
                         {selectedUser && (
                             <div className={styles.modalBody}>
-                                <h2>User Details</h2>
-                                <img
-                                    src={selectedUser.profileImageUrl || '/default-avatar.png'}
-                                    alt={`${selectedUser.name}'s profile`}
-                                    className={styles.modalProfileImage}
-                                    onError={(e) => (e.currentTarget.src = '/default-avatar.png')}
-                                />
-                                <p><strong>ID:</strong> {selectedUser.id}</p>
-                                <p><strong>Name:</strong> {selectedUser.name}</p>
-                                <p><strong>Email:</strong> {selectedUser.email}</p>
-                                <p><strong>Gender:</strong> {selectedUser.gender || 'Not specified'}</p>
-                                <p><strong>Status:</strong> <span className={`${styles.status} ${styles[selectedUser.status]}`}>{selectedUser.status.replace('_', ' ')}</span></p>
-                                <p><strong>Joined:</strong> {new Date(selectedUser.createdAt).toLocaleDateString()}</p>
-                                {/* Add more details as needed */}
+                                <h2>User Details - {selectedUser.name} (ID: {selectedUser.id})</h2>
+                                
+                                {isLoadingDetails && <p>Loading details...</p>}
+                                {detailError && <p className={styles.error}>{detailError}</p>}
+                                
+                                {!isLoadingDetails && !detailError && detailedUser && (
+                                    <>
+                                        {/* --- Display Detailed Info --- */}
+                                        <div className={styles.detailSection}>
+                                            <h4>Basic Info</h4>
+                                            <p><strong>Name:</strong> {detailedUser.name}</p>
+                                            <p><strong>Email:</strong> {detailedUser.email}</p>
+                                            <p><strong>Gender:</strong> {detailedUser.gender || '-'}</p>
+                                            <p><strong>Age:</strong> {detailedUser.age ?? '-'}</p>
+                                            <p><strong>Height:</strong> {detailedUser.height ? `${detailedUser.height} cm` : '-'}</p>
+                                            <p><strong>MBTI:</strong> {detailedUser.mbti || '-'}</p>
+                                            <p><strong>Status:</strong> <span className={`${styles.status} ${styles[detailedUser.status]}`}>{detailedUser.status.replace('_', ' ')}</span></p>
+                                            <p><strong>Occupation:</strong> {detailedUser.occupation?.toString() ?? 'Not Set'}</p>
+                                            <p><strong>Joined:</strong> {new Date(detailedUser.createdAt).toLocaleString()}</p>
+                                            <p><strong>Last Updated:</strong> {detailedUser.updatedAt ? new Date(detailedUser.updatedAt).toLocaleString() : '-'}</p>
+                                        </div>
+
+                                        <div className={styles.detailSection}>
+                                            <h4>Profile Pictures</h4>
+                                            <div className={styles.imageGrid}>
+                                                {detailedUser.profileImageUrls && detailedUser.profileImageUrls.length > 0 ? (
+                                                    detailedUser.profileImageUrls.map((url, index) => (
+                                                        <a key={index} href={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${url}`} target="_blank" rel="noopener noreferrer" className={styles.imageLink}>
+                                                            <img 
+                                                                src={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${url}`} // Prepend Backend URL
+                                                                alt={`Profile ${index + 1}`} 
+                                                                className={styles.modalImage} 
+                                                                onError={(e) => (e.currentTarget.src = '/default-avatar.png')} 
+                                                            />
+                                                            {index === 0 && <span className={styles.mainBadge}>Main</span>}
+                                                        </a>
+                                                    ))
+                                                ) : (
+                                                    <p>No profile pictures uploaded.</p>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        <div className={styles.detailSection}>
+                                            <h4>Business Card / Occupation Proof</h4>
+                                            {detailedUser.businessCardImageUrl ? (
+                                                <a href={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${detailedUser.businessCardImageUrl}`} target="_blank" rel="noopener noreferrer">
+                                                    <img 
+                                                        src={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${detailedUser.businessCardImageUrl}`} // Prepend Backend URL
+                                                        alt="Business Card" 
+                                                        className={styles.modalImage} 
+                                                        style={{ maxWidth: '200px', height: 'auto'}} // Adjust size as needed
+                                                        onError={(e) => (e.currentTarget.style.display = 'none')}
+                                                    />
+                                                </a>
+                                            ) : (
+                                                <p>No business card uploaded.</p>
+                                            )}
+                                        </div>
+                                        {/* --- End Display Detailed Info --- */}
+                                    </>
+                                )}
 
                                 <div className={styles.modalActions}>
                                     {selectedUser.status === 'pending_approval' && (
                                         <button
                                             onClick={() => handleApprove(selectedUser.id)}
                                             className={`${styles.actionButton} ${styles.approveButton}`}
+                                            disabled={isProcessingAction}
                                         >
-                                            Approve
+                                            {isProcessingAction ? 'Processing...' : 'Approve'}
                                         </button>
                                     )}
-                                     {/* Allow rejecting 'active' or 'pending_approval' users */}
                                     {(selectedUser.status === 'pending_approval' || selectedUser.status === 'active') && (
                                         <button
                                             onClick={() => handleReject(selectedUser.id)}
                                              className={`${styles.actionButton} ${styles.rejectButton}`}
+                                             disabled={isProcessingAction}
                                         >
-                                            Reject
+                                            {isProcessingAction ? 'Processing...' : 'Reject'}
                                         </button>
                                     )}
-                                     {/* Optionally, add a button to view rejected users or other actions */}
                                 </div>
                             </div>
                         )}

@@ -1,4 +1,4 @@
-import axios, { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
+import axios from 'axios';
 
 // Define the base URL for your backend API
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'; // Use environment variable or default
@@ -14,7 +14,22 @@ const axiosInstance = axios.create({
 
 // Request interceptor to add the auth token to headers
 axiosInstance.interceptors.request.use(
-  (config: InternalAxiosRequestConfig) => {
+  (config) => {
+    // Check if the request data is FormData
+    if (config.data instanceof FormData) {
+      // If it's FormData, delete the Content-Type header.
+      // Axios will automatically set it to multipart/form-data with the correct boundary.
+      if (config.headers) {
+        delete config.headers['Content-Type'];
+      }
+    } else {
+      // For other request types, ensure the Content-Type is application/json (or rely on default)
+      // The default is set in axios.create, so we usually don't need to set it here again
+      // unless it might have been changed elsewhere.
+      // config.headers = config.headers || {};
+      // config.headers['Content-Type'] = 'application/json'; // This line might be redundant
+    }
+
     // Check if window is defined (runs only on client-side)
     if (typeof window !== 'undefined') {
       const token = localStorage.getItem('authToken');
@@ -31,7 +46,7 @@ axiosInstance.interceptors.request.use(
     }
     return config;
   },
-  (error: AxiosError) => {
+  (error) => {
     // Handle request error
     console.error('[Axios Request Interceptor] Error:', error);
     return Promise.reject(error);
@@ -40,12 +55,12 @@ axiosInstance.interceptors.request.use(
 
 // Optional: Response interceptor for global error handling or data transformation
 axiosInstance.interceptors.response.use(
-  (response: AxiosResponse) => {
+  (response) => {
     // Any status code that lie within the range of 2xx cause this function to trigger
     // console.log('[Axios Response Interceptor] Response received:', response.status);
     return response;
   },
-  (error: AxiosError) => {
+  (error) => {
     // Any status codes that falls outside the range of 2xx cause this function to trigger
     console.error('[Axios Response Interceptor] Error:', error.response?.status, error.response?.data);
 

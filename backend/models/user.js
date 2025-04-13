@@ -63,6 +63,14 @@ module.exports = (sequelize, DataTypes) => {
     occupation: DataTypes.STRING,
     income: DataTypes.STRING,
     profilePictureUrl: DataTypes.STRING,
+    profileImageUrls: {
+      type: DataTypes.JSON,
+      allowNull: true,
+    },
+    businessCardImageUrl: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
     isAdmin: {
       type: DataTypes.BOOLEAN,
       allowNull: false,

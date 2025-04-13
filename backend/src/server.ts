@@ -16,6 +16,8 @@ import { authenticateToken } from './middleware/authMiddleware'; // Import authe
 import { Op } from 'sequelize'; // Import Op for SQL operations
 import bcrypt from 'bcrypt'; // Import bcrypt
 import { Request, Response, NextFunction } from 'express';
+import path from 'path'; // Import path for static file serving
+import fs from 'fs'; // Import fs to check/create directory
 
 // --- Import User model --- 
 const db = require('../models'); // Adjust path if needed
@@ -60,6 +62,26 @@ app.use(
 // --- Passport Configuration ---
 app.use(passport.initialize());
 app.use(passport.session());
+
+// --- JSON Body Parser ---
+// Add this *before* your routes to parse JSON request bodies
+app.use(express.json()); 
+// ------------------------
+
+// --- Static File Serving ---
+// Serve files from the 'uploads' directory at the '/uploads' URL path
+// Ensure this path is relative to the *root* of your project where you run the server
+const uploadsDir = path.join(__dirname, '..', 'uploads'); // If server.ts is in src, '..' goes to root
+// Ensure the base uploads directory exists when the server starts
+if (!fs.existsSync(uploadsDir)) { 
+    fs.mkdirSync(uploadsDir, { recursive: true });
+    console.log(`[Static Init] Created uploads directory: ${uploadsDir}`);
+} else {
+    console.log(`[Static Init] Uploads directory already exists: ${uploadsDir}`);
+}
+console.log(`[Static] Setting up static file serving for /uploads path from directory: ${uploadsDir}`);
+app.use('/uploads', express.static(uploadsDir));
+// -----------------------------
 
 // --- Passport Serialization/Deserialization (Updated) --- 
 passport.serializeUser((user: any, done) => {
@@ -593,6 +615,9 @@ io.on('connection', (socket: any) => {
 });
 // ----------------------------------
 
+// Export the io instance for use in other modules
+export { io };
+
 // --- Ensure Admin User Function --- 
 const ensureAdminUser = async () => {
   const ADMIN_EMAIL = 'root@root.com';
@@ -613,19 +638,30 @@ const ensureAdminUser = async () => {
         gender: 'other',   // Provide a default gender or make nullable in model
         isAdmin: true,     // Set as admin
         // Add defaults for other required fields if necessary
-        occupation: 'Admin' // Example default
+        occupation: 'Admin', // Example default
+        status: 'active' // Ensure admin is active upon creation
       });
       console.log(`Admin user (${ADMIN_EMAIL}) created successfully.`);
 
     } else {
-        // Optionally ensure the existing user is marked as admin
+        // Optionally ensure the existing user is marked as admin and active
+        let needsSave = false;
         if (!existingAdmin.isAdmin) {
             console.log(`Existing user (${ADMIN_EMAIL}) found but is not admin. Updating...`);
             existingAdmin.isAdmin = true;
+            needsSave = true;
+        }
+         if (existingAdmin.status !== 'active') { // Ensure existing admin is active
+             console.log(`Existing admin user (${ADMIN_EMAIL}) is not active (${existingAdmin.status}). Updating status to active...`);
+             existingAdmin.status = 'active';
+             needsSave = true;
+         }
+
+        if (needsSave) {
             await existingAdmin.save();
-            console.log(`Admin user (${ADMIN_EMAIL}) updated to admin.`);
+            console.log(`Admin user (${ADMIN_EMAIL}) updated.`);
         } else {
-             console.log(`Admin user (${ADMIN_EMAIL}) already exists.`);
+             console.log(`Admin user (${ADMIN_EMAIL}) already exists and is admin/active.`);
         }
     }
   } catch (error) {
@@ -659,9 +695,6 @@ const swaggerSpec = swaggerJsdoc(swaggerOptions);
 
 // Serve Swagger UI
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
-
-// Middleware to parse JSON bodies
-app.use(express.json());
 
 // Apply io attachment middleware BEFORE the admin routes
 app.use('/api/admin', attachIo);

@@ -74,9 +74,9 @@ export default function SignupPage() {
                 
                 console.log('Token and status saved to localStorage.');
 
-                // --- Redirect to Pending Approval page --- 
-                alert(responseData.message || 'Signup successful. Please wait for administrator approval.');
-                router.push('/auth/pending-approval'); 
+                // --- Redirect to Profile Completion page --- 
+                alert('회원가입 성공! 프로필 완성을 위해 추가 정보를 입력해주세요.');
+                router.push('/signup/complete-profile');
                 // -------------------------------------------
             } else {
                 console.error('Signup response missing token or user status.', responseData);

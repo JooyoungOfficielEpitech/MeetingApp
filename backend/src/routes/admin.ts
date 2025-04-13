@@ -3,6 +3,10 @@ import { Op, fn, col, literal } from 'sequelize';
 import { authenticateToken } from '../middleware/authMiddleware'; // Import authentication middleware
 import { isAdmin } from '../middleware/adminMiddleware'; // Import admin check middleware
 import jwt from 'jsonwebtoken';
+import fs from 'fs';     // Import fs for file deletion
+import path from 'path'; // Import path for file paths
+// Import the exported io instance from server.ts
+import { io } from '../server'; // Adjust path as needed
 const db = require('../../models'); // Adjust path if needed
 const User = db.User;
 const Match = db.Match; // Import Match model
@@ -283,7 +287,7 @@ router.get('/users', async (req: Request, res: Response, next: NextFunction) => 
  * @swagger
  * /api/admin/users/{userId}/approve:
  *   patch:
- *     summary: Approve a pending user (admin only)
+ *     summary: Approve a user (admin only)
  *     tags: [Admin, Users]
  *     security:
  *       - bearerAuth: []
@@ -292,84 +296,85 @@ router.get('/users', async (req: Request, res: Response, next: NextFunction) => 
  *         name: userId
  *         required: true
  *         schema: { type: integer }
- *         description: ID of the user to approve
+ *         description: The ID of the user to approve
  *     responses:
  *       200: { description: 'User approved successfully' }
- *       400: { description: 'User is not pending approval or already approved' }
+ *       400: { description: 'Invalid user ID' }
  *       401: { description: 'Authentication token required' }
- *       403: { description: 'Forbidden (not an admin or user not found)' }
+ *       403: { description: 'Forbidden (not an admin)' }
+ *       404: { description: 'User not found' }
  *       500: { description: 'Server error' }
  */
-router.patch('/users/:userId/approve', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const userId = parseInt(req.params.userId, 10);
-    const io = (req as any).io; // Correctly get io from req
+router.patch('/users/:userId/approve', async (req: Request, res: Response, next: NextFunction) => {
+    const userId = req.params.userId;
+    // Use the directly imported io instance
+    const ioInstance = io; 
+
     console.log(`[PATCH /api/admin/users/${userId}/approve] Request received.`);
 
-    if (isNaN(userId)) {
-        res.status(400).json({ message: 'Invalid user ID' });
+    if (isNaN(parseInt(userId))) {
+        res.status(400).json({ message: 'Invalid user ID format.' });
         return;
     }
 
     try {
-        const user = await User.findOne({ where: { id: userId, status: 'pending_approval' } });
-
+        const user = await User.findByPk(userId);
         if (!user) {
-            console.warn(`[Admin Approve] User ${userId} not found or not pending approval.`);
-            const existingUser = await User.findByPk(userId);
-            if (existingUser && existingUser.status === 'active') {
-                 res.status(400).json({ message: 'User is already active.'});
-                 return; // Return void
-            }
-            res.status(404).json({ message: 'User not found or not pending approval.'});
-            return; // Return void
+            res.status(404).json({ message: 'User not found' });
+            return;
+        }
+        if (user.status === 'active') {
+             res.status(400).json({ message: 'User is already active.' });
+             return;
         }
 
+        // Update status to active
         user.status = 'active';
+        user.occupation = false; // Ensure occupation is false upon approval
         await user.save();
-        console.log(`[Admin Approve] User ${userId} approved successfully.`);
-
-        if (user.gender === 'male') {
-            try {
-                const [waitlistEntry, created] = await MatchingWaitList.findOrCreate({
-                    where: { userId: user.id },
-                    defaults: { userId: user.id }
-                });
-                if (created) {
-                    console.log(`Approved male user ${user.id} added to MatchingWaitList.`);
-                } else {
-                    console.log(`Approved male user ${user.id} was already in MatchingWaitList.`);
-                }
-            } catch (waitlistError) {
-                console.error(`Error adding approved user ${user.id} to MatchingWaitList:`, waitlistError);
-            }
-        }
+        console.log(`[Admin Approve] User ${userId} status updated to 'active'.`);
 
         // --- Generate NEW JWT with ACTIVE status --- 
-        const newPayload = { userId: user.id, email: user.email, status: 'active' };
-        const newToken = jwt.sign(newPayload, JWT_SECRET, { expiresIn: '1h' }); // Use imported JWT_SECRET
+        const newPayload = {
+            userId: user.id,
+            email: user.email,
+            status: user.status, // Now 'active'
+            gender: user.gender
+        };
+        const newToken = jwt.sign(newPayload, JWT_SECRET, { expiresIn: '1h' });
         // -------------------------------------------
 
         // --- Emit WebSocket event with the NEW token --- 
-        if (io && connectedUsers) { // Use io instance from req
-            let userSocketId: string | null = null;
+        let userSocketId: string | null = null;
+        // Check if connectedUsers map is available and is a Map
+        if (connectedUsers && connectedUsers instanceof Map) {
             for (const [socketId, connectedUser] of connectedUsers.entries()) {
-                if (connectedUser.userId === userId) {
+                 // Ensure comparison is done correctly (e.g., comparing numbers)
+                 if (connectedUser.userId === parseInt(userId, 10)) { // Parse userId from params
                     userSocketId = socketId;
                     break;
                 }
             }
-
-            if (userSocketId) {
-                console.log(`[Admin Approve] Emitting 'userApproved' event with new token to socket ${userSocketId} for user ${userId}`);
-                io.to(userSocketId).emit('userApproved', { 
-                    message: 'Your account has been approved!', 
-                    token: newToken // Send the new token
-                });
-            } else {
-                console.log(`[Admin Approve] Socket not found for approved user ${userId}. Cannot send real-time update.`);
-            }
         } else {
-            console.warn('[Admin Approve] Socket.IO instance or connectedUsers map not available. Cannot send real-time update.');
+             console.warn('[Admin Approve] connectedUsers map is not available or not a Map.');
+        }
+
+        if (userSocketId && ioInstance) { // Check if socketIoInstance is valid
+            console.log(`[Admin Approve] Emitting 'userApproved' event with new token to socket ${userSocketId} for user ${userId}`);
+            ioInstance.to(userSocketId).emit('userApproved', {
+                message: '계정이 승인되었습니다! 메인 페이지로 이동합니다.', // Message in Korean
+                token: newToken, // Send the new token
+                user: { // Send relevant user info needed by frontend
+                    id: user.id,
+                    email: user.email,
+                    name: user.name,
+                    status: user.status // 'active'
+                    // Add other fields if needed
+                }
+            });
+        } else {
+            if (!userSocketId) console.log(`[Admin Approve] Socket not found for approved user ${userId}. Cannot send real-time update.`);
+            if (!ioInstance) console.log(`[Admin Approve] Socket.IO instance unavailable. Cannot send real-time update.`);
         }
         // ---------------------------------------------------
 
@@ -478,6 +483,166 @@ router.patch('/users/:userId/reject', async (req: Request, res: Response, next: 
     }
 });
 
+/**
+ * @swagger
+ * /api/admin/users/{userId}:
+ *   get:
+ *     summary: Get details of a specific user (admin only)
+ *     tags: [Admin, Users]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema: { type: integer }
+ *         description: The ID of the user to retrieve
+ *     responses:
+ *       200:
+ *         description: User details retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema: {$ref: '#/components/schemas/UserProfile'} # Reference detailed user profile schema
+ *       401: { description: 'Authentication token required' }
+ *       403: { description: 'Forbidden (not an admin)' }
+ *       404: { description: 'User not found' }
+ *       500: { description: 'Server error' }
+ */
+router.get('/users/:userId', async (req: Request, res: Response, next: NextFunction) => {
+    const userId = req.params.userId;
+    console.log(`[GET /api/admin/users/${userId}] Request received.`);
+
+    // Validate userId is a number
+    if (isNaN(parseInt(userId))) {
+        res.status(400).json({ message: 'Invalid user ID format.' });
+        return; // Add explicit return
+    }
+
+    try {
+        // Find user by primary key, exclude password hash
+        const user = await User.findByPk(userId, {
+            attributes: { exclude: ['passwordHash'] }
+        });
+
+        if (!user) {
+            console.warn(`[Admin User Detail] User not found with ID: ${userId}`);
+            res.status(404).json({ message: 'User not found' });
+            return; // Add explicit return
+        }
+
+        console.log(`[Admin User Detail] Found user ${userId}:`, user.toJSON());
+        res.status(200).json(user); // Return the full user object (excluding passwordHash)
+        // No return needed here as it's the end of the try block
+
+    } catch (error) {
+        console.error(`[GET /api/admin/users/${userId}] Error fetching user details:`, error);
+        next(error);
+    }
+});
+
+/**
+ * @swagger
+ * /api/admin/users/{userId}:
+ *   delete:
+ *     summary: Permanently delete a user and their files (admin only)
+ *     tags: [Admin, Users]
+ *     description: This action permanently deletes the user record and associated files (profile pics, business card).
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema: { type: integer }
+ *         description: The ID of the user to delete permanently
+ *     responses:
+ *       200: { description: 'User and files deleted successfully' }
+ *       400: { description: 'Invalid user ID' }
+ *       401: { description: 'Authentication token required' }
+ *       403: { description: 'Forbidden (not an admin)' }
+ *       404: { description: 'User not found' }
+ *       500: { description: 'Server error during deletion' }
+ */
+router.delete('/users/:userId', async (req: Request, res: Response, next: NextFunction) => {
+    const userId = req.params.userId;
+    console.log(`[DELETE /api/admin/users/${userId}] Request received for permanent deletion.`);
+    const uploadsBaseDir = path.join(__dirname, '..', '..', 'uploads'); // Re-define or import base path
+
+    if (isNaN(parseInt(userId))) {
+        res.status(400).json({ message: 'Invalid user ID format.' });
+        return;
+    }
+
+    try {
+        // Find the user INCLUDING potential file URLs
+        const user = await User.findByPk(userId);
+
+        if (!user) {
+            res.status(404).json({ message: 'User not found' });
+            return;
+        }
+
+        console.log(`[Admin Delete] Found user ${userId}. Proceeding with file and DB deletion.`);
+
+        // --- Delete Associated Files --- 
+        const filesToDelete: string[] = [];
+        if (user.profileImageUrls && Array.isArray(user.profileImageUrls)) {
+            user.profileImageUrls.forEach((relativeUrl: string) => {
+                // Construct absolute path relative to project root (assuming uploadsBaseDir is correct)
+                if (relativeUrl && typeof relativeUrl === 'string') { // Added type check
+                     // Extract the path part after /uploads/
+                     const filePathPart = relativeUrl.startsWith('/uploads/') ? relativeUrl.substring('/uploads/'.length) : relativeUrl;
+                     filesToDelete.push(path.join(uploadsBaseDir, filePathPart));
+                }
+            });
+        }
+        if (user.businessCardImageUrl && typeof user.businessCardImageUrl === 'string') {
+             const filePathPart = user.businessCardImageUrl.startsWith('/uploads/') ? user.businessCardImageUrl.substring('/uploads/'.length) : user.businessCardImageUrl;
+             filesToDelete.push(path.join(uploadsBaseDir, filePathPart));
+        }
+        // Also delete old single profile picture if exists
+         if (user.profilePictureUrl && typeof user.profilePictureUrl === 'string') {
+             const filePathPart = user.profilePictureUrl.startsWith('/uploads/') ? user.profilePictureUrl.substring('/uploads/'.length) : user.profilePictureUrl;
+             filesToDelete.push(path.join(uploadsBaseDir, filePathPart));
+         }
+
+
+        console.log(`[Admin Delete] Attempting to delete files:`, filesToDelete);
+        filesToDelete.forEach(filePath => {
+            if (fs.existsSync(filePath)) {
+                try {
+                    fs.unlinkSync(filePath);
+                    console.log(`[Admin Delete] Successfully deleted file: ${filePath}`);
+                } catch (unlinkError) {
+                    console.error(`[Admin Delete] Error deleting file ${filePath}:`, unlinkError);
+                }
+            } else {
+                 console.warn(`[Admin Delete] File not found, skipping deletion: ${filePath}`);
+            }
+        });
+        // --- End File Deletion ---
+
+        // --- Delete User Record Permanently --- 
+        await user.destroy({ force: true }); // Use force: true to bypass paranoid mode
+        console.log(`[Admin Delete] User ${userId} permanently deleted from database.`);
+        // ---------------------------------------
+
+        // --- Remove from MatchingWaitList if present --- 
+         try {
+             await MatchingWaitList.destroy({ where: { userId: userId } });
+             console.log(`[Admin Delete] Removed user ${userId} from MatchingWaitList (if existed).`);
+         } catch (waitlistError) {
+             console.error(`[Admin Delete] Error removing user ${userId} from MatchingWaitList:`, waitlistError);
+         }
+         // -------------------------------------------
+
+        res.status(200).json({ message: 'User and associated files deleted successfully' });
+
+    } catch (error) {
+        console.error(`[DELETE /api/admin/users/${userId}] Error deleting user:`, error);
+        next(error);
+    }
+});
 
 // --- Placeholder for other admin routes ---
 // Example: GET /api/admin/users
