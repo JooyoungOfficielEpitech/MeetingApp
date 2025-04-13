@@ -232,6 +232,19 @@ export default function LoginPage() {
              </svg>
             <span>Sign in with Google</span>
           </a>
+
+          {/* ★ Kakao Login Button ★ */}
+          <a
+            href="http://localhost:3001/api/auth/kakao" // Link to backend Kakao auth route
+            className={`${buttonBaseStyle} mt-3 flex items-center justify-center bg-[#FEE500] hover:bg-[#F7D600] text-black focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-800 focus:ring-[#FEE500]`}
+          >
+             {/* Kakao Icon Placeholder */}
+             <svg className="w-5 h-5 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#000000">
+                <path d="M12.18,2.06C6.57,2.06,2,5.8,2,10.46c0,3.19,1.99,5.99,4.99,7.5v3.79c0,.1.06,.19.16,.23,.05,.03,.1,.04,.15,.04,.06,0,.13-.02,.18-.06l4.21-2.79c.43,.04,.86,.06,1.3,.06,5.61,0,10.18-3.74,10.18-8.4,0-4.66-4.57-8.4-10.18-8.4Z"/>
+             </svg>
+            <span>Sign in with Kakao</span>
+          </a>
+          {/* ------------------------- */}
           {/* Add buttons for Facebook, Kakao later */} 
         </div>
         {/* ------------------------- */}

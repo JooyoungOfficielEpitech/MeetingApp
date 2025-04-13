@@ -28,9 +28,9 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.STRING,
       allowNull: false,
       unique: true,
-      validate: {
-        isEmail: true,
-      },
+      // validate: {
+      //   isEmail: true,
+      // },
     },
     passwordHash: {
       type: DataTypes.STRING,
@@ -40,6 +40,12 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.STRING,
       unique: true,
       allowNull: true,
+    },
+    kakaoId: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      unique: true,
+      comment: 'Kakao User ID for social login'
     },
     name: DataTypes.STRING,
     dob: DataTypes.DATEONLY,

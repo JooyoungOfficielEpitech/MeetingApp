@@ -1,5 +1,6 @@
 import passport from 'passport';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
+import { Strategy as KakaoStrategy } from 'passport-kakao';
 // import { User } from '../db/models'; // Adjust path if necessary
 const db = require('../../models'); // Correct path and use require
 const User = db.User;
@@ -66,5 +67,68 @@ export function configurePassport() {
       }
     ));
 
-    console.log('[Passport Config] Passport configured (Serialization, Deserialization, Google Strategy).');
+    // Kakao Strategy
+    passport.use(new KakaoStrategy({
+        clientID: process.env.KAKAO_CLIENT_ID!,
+        clientSecret: process.env.KAKAO_CLIENT_SECRET!,
+        callbackURL: process.env.KAKAO_CALLBACK_URL || "http://localhost:3001/api/auth/kakao/callback",
+        passReqToCallback: true
+    },
+    async (req: any, accessToken, refreshToken, profile, done) => {
+        console.log('[Kakao Strategy] Profile:', profile);
+        const kakaoId = String(profile.id);
+        const email = profile._json?.kakao_account?.email; // Try to get email
+        const nickname = profile.displayName || profile.username || `kakao_${kakaoId}`; // Use nickname or generate fallback
+        const gender = profile._json?.kakao_account?.gender;
+
+        // --- Use nickname if email is unavailable --- 
+        const emailOrNickname = email || nickname;
+        if (!email) {
+            console.warn(`[Kakao Strategy] Email not provided for Kakao ID ${kakaoId}. Using nickname "${nickname}" as identifier.`);
+        }
+        // -------------------------------------------
+
+        try {
+            const existingUser = await User.findOne({ where: { kakaoId: kakaoId } });
+
+            if (existingUser) {
+                console.log('[Kakao Strategy] Existing user found:', existingUser.id);
+                const isProfileComplete = existingUser.gender && ['male', 'female'].includes(existingUser.gender);
+
+                if (isProfileComplete || existingUser.status !== 'pending_profile_completion') {
+                    console.log('[Kakao Strategy] Profile complete or not pending. Authenticating user.');
+                    return done(null, existingUser);
+                } else {
+                    console.log('[Kakao Strategy] Existing user profile incomplete. Storing pending info (using nickname as email if needed).');
+                    // ★ Store nickname in email field if email is missing
+                    req.session.pendingSocialProfile = { provider: 'kakao', id: kakaoId, email: emailOrNickname, name: nickname, gender };
+                    req.session.save((err: any) => {
+                        if (err) { return done(err); }
+                        console.log('[Kakao Strategy] Session saved for incomplete existing user.');
+                        return done(null, false, { message: 'Profile completion required for existing user.' });
+                    });
+                }
+            } else {
+                // --- REMOVED: Check for existing user by email --- 
+                // const userWithEmail = await User.findOne({ where: { email: emailOrNickname } });
+                // if (userWithEmail) { ... return error ... }
+                // --------------------------------------------------
+                
+                // New user via Kakao
+                console.log('[Kakao Strategy] New user, storing pending profile in session (using nickname as email if needed).');
+                // ★ Store nickname in email field if email is missing
+                req.session.pendingSocialProfile = { provider: 'kakao', id: kakaoId, email: emailOrNickname, name: nickname, gender };
+                req.session.save((err: any) => {
+                    if (err) { return done(err); }
+                    console.log('[Kakao Strategy] Session saved for new user.');
+                    return done(null, false, { message: 'New user requires profile completion.' });
+                });
+            }
+        } catch (error) {
+            console.error('[Kakao Strategy] Error:', error);
+            return done(error, false);
+        }
+    }));
+
+    console.log('[Passport Config] Passport configured (Serialization, Deserialization, Google Strategy, Kakao Strategy).');
 } 

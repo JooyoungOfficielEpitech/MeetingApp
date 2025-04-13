@@ -12,11 +12,11 @@ import 'express-session';
 declare module 'express-session' {
   interface SessionData {
     pendingSocialProfile?: {
-      id: string; // Google ID
+      provider: 'google' | 'kakao'; // ★ 명시적으로 provider 추가
+      id: string; // Google ID or Kakao ID (string)
       email: string;
       name?: string;
-      gender?: string;
-      provider?: string; 
+      gender?: string; // Kakao는 성별 정보를 줄 수 있음
     } | null; // Allow null when cleared
   }
 }
@@ -781,7 +781,7 @@ router.post(
              res.status(401).json({ message: 'Session expired or invalid after file upload. Please try social login again.' });
              return;
         }
-        const { id: googleId, email: sessionEmail, name: sessionName } = pendingProfile;
+        const { id: googleId, email: sessionEmail, name: sessionName, provider } = pendingProfile;
         console.log(`[POST /api/auth/complete-social] Processing request for social user: ${sessionEmail} (Google ID: ${googleId})`);
         // ----------------------------------------------
 
@@ -829,18 +829,6 @@ router.post(
         // --- End Validation ---
 
         try {
-            // --- Check if user already exists (using session email/googleId) ---
-            const existingUser = await User.findOne({ where: { [Op.or]: [{ email: sessionEmail }, { googleId: googleId }] } });
-            if (existingUser) {
-                 console.warn(`[complete-social] Conflict: User already exists with email ${sessionEmail} or googleId ${googleId}.`);
-                 cleanupFiles();
-                 // Clear session data as the user exists
-                 if(req.session) req.session.pendingSocialProfile = null;
-                 res.status(409).json({ message: 'User with this email or social ID already exists.' });
-                 return;
-            }
-            // ---------------------------------------------------------------------
-
             // Prepare file paths
             if (!files || !files.profilePictures || files.profilePictures.length === 0 || !files.businessCard || files.businessCard.length === 0) {
                  console.error('[complete-social] Internal Server Error: File objects missing after validation.');
@@ -853,10 +841,11 @@ router.post(
             );
             const businessCardImageUrl = `/uploads/business_cards/${path.basename(files.businessCard[0].path)}`;
 
-            // --- Create NEW user record --- 
+            // --- Create NEW user record (using sessionEmail which might be nickname) --- 
             const newUser = await User.create({
-                googleId: googleId,
-                email: sessionEmail,
+                googleId: provider === 'google' ? googleId : null, // Store googleId if provider is google
+                kakaoId: provider === 'kakao' ? googleId : null,   // Store kakaoId if provider is kakao
+                email: sessionEmail, // This might be the nickname for Kakao users
                 name: sessionName, // Use name from session
                 age: parseInt(age),
                 height: parseInt(height),
@@ -864,11 +853,10 @@ router.post(
                 gender: gender.toLowerCase(),
                 profileImageUrls: profileImageUrls,
                 businessCardImageUrl: businessCardImageUrl,
-                status: 'pending_approval', // Require admin approval
+                status: 'pending_approval', 
                 occupation: false, 
-                // passwordHash will be null
             });
-            console.log(`[complete-social] New user ${newUser.id} created via social completion, status set to pending_approval.`);
+            console.log(`[complete-social] New user ${newUser.id} created via ${provider} completion, status set to pending_approval. Email/Identifier: ${sessionEmail}`);
             // -------------------------------
 
             // --- Clear pending profile from session --- 
@@ -1051,6 +1039,96 @@ router.get('/google/callback',
     }
 );
 // --- End Google Authentication Routes ---
+
+// --- Kakao Authentication Routes ---
+
+/**
+ * @swagger
+ * /api/auth/kakao:
+ *   get:
+ *     summary: Initiate Kakao OAuth 2.0 login flow
+ *     tags: [Authentication]
+ *     responses:
+ *       302:
+ *         description: Redirects to Kakao for authentication.
+ */
+router.get('/kakao',
+    passport.authenticate('kakao') // Only need email scope by default
+);
+
+/**
+ * @swagger
+ * /api/auth/kakao/callback:
+ *   get:
+ *     summary: Kakao OAuth 2.0 callback URL
+ *     tags: [Authentication]
+ *     description: >
+ *       Handles the redirect from Kakao after user authentication.
+ *       If successful and profile complete, redirects to frontend auth callback with JWT.
+ *       If new user or profile incomplete, redirects to frontend profile completion page.
+ *       On failure, redirects to frontend home page with an error query parameter.
+ *     responses:
+ *       302:
+ *         description: >
+ *           Redirects to frontend:
+ *           - `http://localhost:3000/auth/callback?token=<jwt>` on successful login (profile complete).
+ *           - `http://localhost:3000/signup/complete-profile` for new users or incomplete profiles.
+ *           - `http://localhost:3000/?error=<error_message>` on authentication failure.
+ */
+router.get('/kakao/callback',
+    (req: any, res, next) => { // Logging middleware (optional)
+        console.log('\n--- Entering /auth/kakao/callback route ---');
+        console.log('Session Data BEFORE authenticate:', JSON.stringify(req.session, null, 2));
+        next();
+    },
+    (req: any, res, next) => { // Custom authentication callback handler
+        passport.authenticate('kakao', { failureRedirect: 'http://localhost:3000/?error=kakao_auth_failed' },
+            async (err: any, user: any, info: any) => {
+                console.log('\n--- Inside /auth/kakao/callback passport.authenticate ---');
+                console.log('Error:', err);
+                // User from strategy comes as a Sequelize model instance
+                console.log('User object (from strategy done()):', user ? user.toJSON() : user); 
+                console.log('Info:', info);
+                console.log('Session Data IN callback:', JSON.stringify(req.session, null, 2));
+
+                if (err) {
+                    console.error('Authentication Error from Kakao strategy:', err);
+                    return res.redirect(`http://localhost:3000/?error=kakao_auth_error`);
+                }
+
+                if (user) {
+                    // --- Existing User Authenticated by Strategy --- 
+                    console.log('Kakao Callback: Existing user authenticated.', user.toJSON());
+                    const isProfileComplete = user.gender && ['male', 'female'].includes(user.gender);
+
+                    if (isProfileComplete || user.status !== 'pending_profile_completion') { // Check profile or status
+                         console.log('Kakao Callback: Profile complete or status ok. Generating token.');
+                         // Profile complete: Generate JWT and redirect to frontend callback
+                         const payload = { userId: user.id, email: user.email, status: user.status };
+                         const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
+                         console.log('Redirecting to /auth/callback with token.');
+                         return res.redirect(`http://localhost:3000/auth/callback?token=${token}`);
+                    } else {
+                         // Profile incomplete: Session should have been set by strategy, redirect to complete
+                         console.log('Kakao Callback: Existing user profile incomplete. Redirecting to complete profile.');
+                         // Ensure session was saved by strategy before redirecting
+                         return res.redirect(`http://localhost:3000/signup/complete-profile`);
+                    }
+                } else if (req.session && req.session.pendingSocialProfile && req.session.pendingSocialProfile.provider === 'kakao') {
+                    // --- New User via Kakao (strategy called done(null, false)) --- 
+                    console.log('Kakao Callback: New user identified by session. Redirecting to complete profile.');
+                    // Session already has data, just redirect
+                    return res.redirect('http://localhost:3000/signup/complete-profile');
+                } else {
+                    // --- Authentication Failed or Unexpected State ---
+                    console.error('Kakao Callback: Unexpected state or user denied access. User:', user, 'Info:', info, 'Session:', req.session);
+                    const failureMsg = info?.message || 'kakao_authentication_failed';
+                    return res.redirect(`http://localhost:3000/?error=${encodeURIComponent(failureMsg)}`);
+                }
+            })(req, res, next); // Invoke the middleware
+    }
+);
+// --- End Kakao Authentication Routes ---
 
 // ... (Keep other routes like /verify-token, etc. if they exist) ...
 

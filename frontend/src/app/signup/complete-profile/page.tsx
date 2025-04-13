@@ -58,59 +58,96 @@ export default function CompleteProfilePage() {
     const [businessCardPreview, setBusinessCardPreview] = useState<string | null>(null);
 
     useEffect(() => {
-        // Fetch temporary profile data from session
+        const token = localStorage.getItem('authToken');
+        console.log(`[Complete Profile] Page loaded. Token present: ${!!token}`);
+
+        // Fetch temporary profile data from session (for Social Login)
         const fetchSessionData = async () => {
+            console.log('[Complete Profile] Attempting to fetch session data (for social login)...');
             setIsLoading(true);
             setError(null);
             try {
-                // Use a standard axios instance or configure axiosInstance to NOT send token for this request
-                // Assuming standard axios for session endpoint
                 const response = await axios.get<ProfileDataResponse>(
-                    'http://localhost:3001/api/auth/session/profile-data', // ★ 백엔드 전체 URL 명시
-                    { withCredentials: true } // ★ 세션 쿠키 전송 옵션 추가
-                ); 
-
+                    'http://localhost:3001/api/auth/session/profile-data',
+                    { withCredentials: true }
+                );
                 const data = response.data;
                 console.log('[Complete Profile] Fetched session profile data:', data);
-
-                // --- 세션 데이터 유효성 검사 및 상태 설정 ---
-                if (!data || !data.email) { // 이메일은 필수값이라고 가정
+                if (!data || !data.email) {
                     console.error('[Complete Profile] Invalid or missing session data.');
-                    setError('세션 정보가 유효하지 않습니다. 다시 Google 로그인을 시도해주세요.');
-                     // 세션 데이터 없으면 진행 불가, 로그인 페이지로 리디렉션
-                    router.replace('/');
+                    setError('세션 정보가 유효하지 않습니다. 소셜 로그인을 다시 시도해주세요.');
+                    // Optionally redirect or show specific error for social flow
+                    router.replace('/'); // Go back to login for safety
                     return;
                 }
-                // ---------------------------------------
-
                 setEmail(data.email || '');
                 setName(data.name || '');
-                setGender(data.gender || ''); // 세션에 성별 정보가 있다면 미리 채움
-
+                setGender(data.gender || '');
             } catch (err: any) {
-                console.error("Failed to fetch session profile data:", err);
-                let errorMessage = '임시 프로필 정보를 불러오는 중 오류가 발생했습니다.';
-                if (err.response?.status === 401) {
-                    // 세션이 없거나 만료된 경우
-                    errorMessage = '세션이 만료되었거나 유효하지 않습니다. 다시 Google 로그인을 시도해주세요.';
-                    router.replace('/'); // 로그인 페이지로 리디렉션
-                    return;
-                } else if (err.response) {
-                    errorMessage = err.response.data?.message || `세션 데이터 로딩 실패 (Status: ${err.response.status})`;
-                } else if (err.request) {
-                   errorMessage = '서버 연결 실패. 네트워크를 확인해주세요.';
-                } else {
-                    errorMessage = err.message || errorMessage;
-                }
-                setError(errorMessage);
-                // 오류 발생 시 로딩 상태는 false로 유지
+                 console.error("Failed to fetch session profile data:", err);
+                 let errorMessage = '임시 프로필 정보를 불러오는 중 오류가 발생했습니다.';
+                 if (err.response?.status === 401) {
+                     errorMessage = '세션이 만료되었거나 유효하지 않습니다. 소셜 로그인을 다시 시도해주세요.';
+                     router.replace('/'); 
+                     return;
+                 } else if (err.response) {
+                     errorMessage = err.response.data?.message || `세션 데이터 로딩 실패 (Status: ${err.response.status})`;
+                 } else { errorMessage = err.message || errorMessage; }
+                 setError(errorMessage);
             } finally {
                 setIsLoading(false);
             }
         };
 
-        // 페이지 로드 시 세션 데이터 가져오기 실행
-        fetchSessionData();
+        // Fetch user data using token (for Regular Signup)
+        const fetchUserDataWithToken = async () => {
+            console.log('[Complete Profile] Attempting to fetch user data with token (for regular signup)...');
+            setIsLoading(true);
+            setError(null);
+            try {
+                // Use axiosInstance which should include the token
+                const response = await axiosInstance.get<ProfileDataResponse>('/api/profile/me'); 
+                const data = response.data;
+                console.log('[Complete Profile] Fetched user data via token:', data);
+                
+                // Assuming /api/profile/me returns at least email and name for the token's user
+                if (!data || !data.email) { 
+                    console.error('[Complete Profile] Invalid data received from /api/profile/me.');
+                    setError('사용자 정보를 가져오는데 실패했습니다. 다시 로그인해주세요.');
+                    localStorage.removeItem('authToken'); // Clear potentially invalid token
+                    router.replace('/'); 
+                    return;
+                }
+                setEmail(data.email || '');
+                setName(data.name || '');
+                setGender(data.gender || ''); // Pre-fill gender if available
+
+            } catch (err: any) {
+                 console.error("Failed to fetch user data with token:", err);
+                 let errorMessage = '사용자 정보를 불러오는 중 오류가 발생했습니다.';
+                 if (err.response?.status === 401 || err.response?.status === 403) {
+                     errorMessage = '인증 정보가 유효하지 않습니다. 다시 로그인해주세요.';
+                     localStorage.removeItem('authToken');
+                     router.replace('/'); 
+                     return;
+                 } else if (err.response) {
+                      errorMessage = err.response.data?.message || `사용자 정보 로딩 실패 (Status: ${err.response.status})`;
+                 } else { errorMessage = err.message || errorMessage; }
+                 setError(errorMessage);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        // --- Conditional Fetching --- 
+        if (token) {
+            // If token exists, assume regular signup flow
+            fetchUserDataWithToken();
+        } else {
+            // If no token, assume social login flow
+            fetchSessionData();
+        }
+        // ---------------------------
 
     }, [router]);
 
@@ -233,60 +270,59 @@ export default function CompleteProfilePage() {
         }
         // --- End Validation ---
 
-        // --- Create FormData ---
         const formData = new FormData();
         formData.append('age', age);
         formData.append('height', height);
         formData.append('gender', gender);
         formData.append('mbti', mbti);
-        // Backend should use session/token to identify user
-
-        // Append profile pictures (Backend field name: 'profilePictures')
-        profilePictures.forEach((file) => {
-            formData.append('profilePictures', file, file.name);
-        });
-
-        // Append business card (Backend field name: 'businessCard')
-        if (businessCard) {
-            formData.append('businessCard', businessCard, businessCard.name);
-        }
-        // --- End Create FormData ---
+        profilePictures.forEach((file) => { formData.append('profilePictures', file, file.name); });
+        if (businessCard) { formData.append('businessCard', businessCard, businessCard.name); }
 
         console.log('Submitting profile completion with FormData...');
+        const token = localStorage.getItem('authToken');
 
         try {
-            // Use standard axios with credentials, not axiosInstance (token-based)
-            const response = await axios.post<CompleteSocialResponse>(
-                'http://localhost:3001/api/auth/complete-social', // ★ 백엔드 전체 URL
-                 formData, 
-                 { withCredentials: true } // ★ 세션 쿠키 전송
-             );
+            let response: any;
+            let data: CompleteSocialResponse; // Assume similar response structure for now
 
-            const data = response.data; // Now data has the type CompleteSocialResponse
-            console.log('Response from /complete-social:', data);
+            if (token) {
+                // --- Regular Signup Flow (Use Token Auth) ---
+                console.log('[Handle Submit] Token found. Calling /api/profile/complete-regular');
+                response = await axiosInstance.post<CompleteSocialResponse>(
+                    '/api/profile/complete-regular', // Use relative path if axiosInstance has baseURL set
+                    formData
+                    // axiosInstance should automatically include the token
+                );
+                data = response.data;
+                console.log('Response from /complete-regular:', data);
+                // ---------------------------------------------
+            } else {
+                // --- Social Login Flow (Use Session Auth) ---
+                console.log('[Handle Submit] No token found. Calling /api/auth/complete-social');
+                response = await axios.post<CompleteSocialResponse>(
+                    'http://localhost:3001/api/auth/complete-social', 
+                    formData, 
+                    { withCredentials: true } 
+                );
+                data = response.data;
+                console.log('Response from /complete-social:', data);
+                // -----------------------------------------
+            }
 
-            // Check for successful status codes and token
-            if ((response.status === 200 || response.status === 201) && data.token) {
-                localStorage.setItem('authToken', data.token);
-                // Safely access user properties
-                if (data.user?.id) {
-                    localStorage.setItem('userId', data.user.id.toString());
-                }
-                if (data.user?.gender) {
-                    localStorage.setItem('userGender', data.user.gender);
-                }
-                // Update user status based on response
-                localStorage.setItem('userStatus', data.user?.status || 'pending_approval'); 
-                console.log('Profile submitted successfully. Status:', data.user?.status);
+            // --- Process Response (Common for both flows) --- 
+            if ((response.status === 200 || response.status === 201) && data.token && data.user) {
+                localStorage.setItem('authToken', data.token); // Update token (it might contain new status)
+                localStorage.setItem('userId', data.user.id.toString());
+                localStorage.setItem('userGender', data.user.gender);
+                localStorage.setItem('userStatus', data.user.status || 'pending_approval');
+                console.log('Profile submitted successfully. Status:', data.user.status);
                 
-                // --- Redirect to Pending Approval page ---
                 alert(data.message || '프로필 정보가 제출되었습니다. 관리자 승인을 기다려주세요.'); 
                 router.replace('/auth/pending-approval'); // Redirect to pending approval page
-                // ------------------------------------------
             } else {
-                 // Handle cases where response is 2xx but token/user data might be missing
                  setError(data.message || `회원가입 처리 중 예상치 못한 응답: ${response.status}`);
             }
+            // -----------------------------------------------
         } catch (err: any) {
             console.error('Failed to complete profile:', err);
             let errorMessage = '예상치 못한 오류가 발생했습니다. 다시 시도해주세요.';
