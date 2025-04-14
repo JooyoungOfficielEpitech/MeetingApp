@@ -671,13 +671,13 @@ const completeSocialProfileHandler: RequestHandler = async (req: Request, res: R
 
 // --- NEW Profile Completion Route Handler (Replaces old /social/complete or similar) ---
 // Define type for uploaded files in request for clarity
-interface AuthenticatedRequest extends Request {
-    user?: { userId: number; [key: string]: any }; // Define structure for req.user
-    files?: { // Define structure for req.files from multer.fields
-        profilePictures?: Express.Multer.File[];
-        businessCard?: Express.Multer.File[];
-    };
-}
+// interface AuthenticatedRequest extends Request {
+//     user?: { userId: number; [key: string]: any }; // Define structure for req.user
+//     files?: { // Define structure for req.files from multer.fields
+//         profilePictures?: Express.Multer.File[];
+//         businessCard?: Express.Multer.File[];
+//     };
+// }
 
 /**
  * @swagger
@@ -753,8 +753,8 @@ interface AuthenticatedRequest extends Request {
  */
 router.post(
     '/complete-social',
-    (req: Request, res: Response, next: NextFunction) => { 
-        // Middleware to check if session exists before multer tries to access it
+    // Middleware to check if session exists before multer tries to access it
+    (req: Request, res: Response, next: NextFunction) => { // Use standard Request type
         if (!req.session || !req.session.pendingSocialProfile) {
              console.error('[complete-social Pre-Multer Check] Error: Session or pendingSocialProfile missing.');
              res.status(401).json({ message: 'Session expired or invalid. Please try social login again.' });
@@ -767,10 +767,13 @@ router.post(
         { name: 'profilePictures', maxCount: 3 },
         { name: 'businessCard', maxCount: 1 }
     ]),
-    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-        // Cast req to reuse AuthenticatedRequest type for file structure, but user field won't exist
-        const socialReq = req as AuthenticatedRequest; 
-        const files = socialReq.files;
+    // Cast req to reuse AuthenticatedRequest type for file structure, but user field won't exist
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => { // Use standard Request type
+        // const socialReq = req as AuthenticatedRequest; // Remove cast
+        const files = (req as any).files as { // Use type assertion for files
+            profilePictures?: Express.Multer.File[];
+            businessCard?: Express.Multer.File[];
+        }; 
         
         // --- Get data from SESSION, not req.user ---
         const pendingProfile = req.session?.pendingSocialProfile;
@@ -802,7 +805,7 @@ router.post(
         // ---------------------------------------------------
 
         // --- Validation (use body data) ---
-        const { age, height, mbti, gender } = socialReq.body;
+        const { age, height, mbti, gender } = (req as any).body;
         const errors: string[] = [];
         if (!age || isNaN(parseInt(age)) || parseInt(age) < 19) errors.push('Valid age (19+) is required.');
         if (!height || isNaN(parseInt(height)) || parseInt(height) < 100) errors.push('Valid height (>= 100cm) is required.');

@@ -2,12 +2,8 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { JWT_SECRET } from '../config/jwt'; // Import from config
 
-// Extend Express Request type to include user property
-export interface AuthenticatedRequest extends Request {
-    user?: { userId: number; email: string; status?: string; [key: string]: any }; // Define structure for req.user
-}
-
-export const authenticateToken = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+// req 타입을 표준 Request로 변경
+export const authenticateToken = (req: Request, res: Response, next: NextFunction): void => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
 
@@ -33,9 +29,17 @@ export const authenticateToken = (req: AuthenticatedRequest, res: Response, next
             return; // Explicitly return void
         }
 
-        // Token is valid, attach payload to request object
+        // req.user 할당 시 타입 단언 불필요 (Express.User가 증강됨)
         console.log('[AuthMiddleware] Token verified. Payload:', user);
-        req.user = user as { userId: number; email: string; status?: string }; // Type assertion
+        // Ensure payload matches the augmented Express.User structure
+        if (user && typeof user.userId === 'number' && typeof user.email === 'string') {
+            req.user = user; // Directly assign if structure is correct
+        } else {
+            console.error('[AuthMiddleware] Invalid JWT payload structure for req.user.');
+            // Handle error appropriately, maybe return 403
+            res.status(403).json({ message: 'Invalid token payload' });
+            return;
+        }
         next(); // pass the execution to the next handler/middleware
     });
 }; 

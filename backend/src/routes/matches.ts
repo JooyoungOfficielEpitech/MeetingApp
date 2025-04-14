@@ -1,5 +1,5 @@
 import express, { Request, Response, NextFunction, RequestHandler } from 'express';
-import { authenticateToken } from '../middleware/authMiddleware'; // Assuming auth middleware exists
+import { authenticateToken } from '../middleware/authMiddleware'; // 수정된 미들웨어 import
 import { Op, fn, literal } from 'sequelize';
 const db = require('../../models');
 const Match = db.Match;
@@ -48,22 +48,20 @@ const router = express.Router();
  *       500:
  *         description: Server error
  */
-router.get('/active', authenticateToken, (async (req: any, res: Response, next: NextFunction) => {
+// @ts-ignore
+router.get('/active', authenticateToken, (async (req: Request, res: Response, next: NextFunction) => {
     console.log('[/api/matches/active] Received request. Checking req.user...');
-    console.log('req.user:', req.user); // Access req.user directly
+    console.log('req.user:', req.user);
 
     try {
-        // Directly extract userId, expecting a number from JWT payload
         const userId = req.user?.userId;
-        console.log(`Extracted userId: ${userId}, Type: ${typeof userId}`); // Log extracted ID and its type
+        console.log(`Extracted userId: ${userId}, Type: ${typeof userId}`);
 
-        // Check if userId exists and is a number
         if (userId === undefined || userId === null || typeof userId !== 'number') {
             console.error('Unauthorized: User ID not found or invalid in req.user');
             return res.status(401).json({ message: 'Unauthorized: User ID not found or invalid in token' });
         }
 
-        // No need for parseInt anymore
         console.log(`Checking for active match for user ID: ${userId}`);
 
         const activeMatch = await Match.findOne({
@@ -79,17 +77,17 @@ router.get('/active', authenticateToken, (async (req: any, res: Response, next: 
 
         if (activeMatch) {
             console.log(`Active match found: ${activeMatch.matchId} for user ID: ${userId}`);
-            res.json({ matchId: activeMatch.matchId });
+            return res.json({ matchId: activeMatch.matchId });
         } else {
             console.log(`No active match found for user ID: ${userId}`);
-            res.status(404).json({ message: 'No active match found' });
+            return res.status(404).json({ message: 'No active match found' });
         }
 
     } catch (error) {
         console.error(`Error fetching active match for user (userId from token: ${(req as any).user?.userId}):`, error);
         next(error); 
     }
-}) as RequestHandler);
+}));
 
 // --- ★ NEW MATCHING FLOW ENDPOINTS ★ ---
 
@@ -109,8 +107,8 @@ router.get('/active', authenticateToken, (async (req: any, res: Response, next: 
  *       403: { description: 'Forbidden (not a female user or other restriction)' }
  *       500: { description: 'Server error' }
  */
-router.post('/start', authenticateToken, async (req: any, res: Response, next: NextFunction) => {
-    // Access req.user, check for its existence and properties
+// @ts-ignore
+router.post('/start', authenticateToken, async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user || typeof req.user.userId !== 'number') {
         return res.status(401).json({ message: 'Unauthorized: Invalid user data in token.' });
     }
@@ -119,7 +117,6 @@ router.post('/start', authenticateToken, async (req: any, res: Response, next: N
     console.log(`[POST /api/matches/start] User ${userId} requested to start matching.`);
 
     try {
-        // Fetch the user from DB to get the gender
         const user = await User.findByPk(userId);
 
         if (!user) {
@@ -127,13 +124,11 @@ router.post('/start', authenticateToken, async (req: any, res: Response, next: N
             return res.status(404).json({ message: 'User not found.' });
         }
 
-        // 1. Check if user is female using DB data
         if (user.gender !== 'female') {
             console.warn(`[Match Start] User ${userId} is not female (gender: ${user.gender}), cannot start match.`);
             return res.status(403).json({ message: 'Only female users can initiate matching.' });
         }
 
-        // 2. Check if user is already in an active match or on the waitlist
         const existingMatch = await Match.findOne({ 
             where: { [Op.or]: [{ user1Id: userId }, { user2Id: userId }], isActive: true }
         });
@@ -145,28 +140,23 @@ router.post('/start', authenticateToken, async (req: any, res: Response, next: N
         const alreadyWaiting = await MatchingWaitList.findOne({ where: { userId } });
         if (alreadyWaiting) {
             console.warn(`[Match Start] User ${userId} is already on the waitlist.`);
-            // If already waiting, perhaps just return the waiting status
             return res.status(202).json({ message: 'Already searching for a match.' });
         }
 
-        // 3. Try to find an immediate match (male user on waitlist)
         const availableMale = await MatchingWaitList.findOne({
             include: [{ model: User, as: 'User', where: { gender: 'male' }, required: true }], 
-            order: [['createdAt', 'ASC']] // Optional: FIFO matching
+            order: [['createdAt', 'ASC']]
         });
 
         if (availableMale) {
-            // --- IMMEDIATE MATCH FOUND --- 
             const maleUserId = availableMale.userId;
             console.log(`[Match Start] Immediate match found for User ${userId} with User ${maleUserId}.`);
 
             const matchId = `match-${userId}-${maleUserId}-${Date.now()}`;
             
-            // Use a transaction for atomicity
             const sequelize = db.sequelize; 
             try {
                 await sequelize.transaction(async (t: any) => {
-                    // Create Match record
                     const newMatch = await Match.create({
                         matchId: matchId,
                         user1Id: userId, 
@@ -175,17 +165,13 @@ router.post('/start', authenticateToken, async (req: any, res: Response, next: N
                         status: 'active' 
                     }, { transaction: t });
 
-                    // Remove both users from waitlist
                     await MatchingWaitList.destroy({ 
                         where: { userId: [userId, maleUserId] }, 
                         transaction: t 
                     });
                     console.log(`[Match Start Transaction] Match ${matchId} created, users removed from waitlist.`);
-                    // Return matchId from transaction scope if needed elsewhere, though not needed for response here
                 });
-                // --- Transaction End --- 
 
-                // --- Notify users via WebSocket AFTER successful transaction --- 
                 try {
                     let femaleSocketId: string | null = null;
                     let maleSocketId: string | null = null;
@@ -194,7 +180,7 @@ router.post('/start', authenticateToken, async (req: any, res: Response, next: N
                         if (connectedUser.userId === maleUserId) maleSocketId = socketId;
                         if (femaleSocketId && maleSocketId) break;
                     }
-                    const updatePayload = { status: 'matched', matchId: matchId }; // Use matchId directly
+                    const updatePayload = { status: 'matched', matchId: matchId };
                     if (femaleSocketId) {
                         io.to(femaleSocketId).emit('match_update', updatePayload);
                         console.log(`[Match Start] Sent match_update (matched) to female user ${userId} (Socket ${femaleSocketId}).`);
@@ -206,24 +192,19 @@ router.post('/start', authenticateToken, async (req: any, res: Response, next: N
                 } catch (socketError) {
                     console.error("[Match Start] Error emitting WebSocket update for immediate match:", socketError);
                 }
-                // ----------------------------------
 
-                // Respond to the female user who initiated
-                res.status(200).json({ matchId: matchId });
+                return res.status(200).json({ matchId: matchId });
 
-            } catch (dbError) { // Catch errors from the transaction
+            } catch (dbError) {
                 console.error(`[Match Start] Error during immediate match DB transaction:`, dbError);
                 return res.status(500).json({ message: 'Error processing immediate match.' });
             }
 
         } else {
-            // --- NO IMMEDIATE MATCH - ADD TO WAITLIST --- 
             console.log(`[Match Start] No immediate match for ${userId}. Adding to waitlist (gender: female).`);
-            // Wrap in try-catch for safety
             try {
                 await MatchingWaitList.create({ userId: userId, gender: 'female' }); 
 
-                // --- Notify female user they are waiting --- 
                 try {
                     let femaleSocketId: string | null = null;
                     for (const [socketId, connectedUser] of connectedUsers.entries()) {
@@ -239,8 +220,8 @@ router.post('/start', authenticateToken, async (req: any, res: Response, next: N
                 } catch (socketError) {
                      console.error("[Match Start] Error emitting WebSocket update for waiting status:", socketError);
                 }
-                // ----------------------------------------
-                res.status(202).json({ message: 'Searching for a match. Please wait.' });
+
+                return res.status(202).json({ message: 'Searching for a match. Please wait.' });
 
             } catch (waitlistError) {
                  console.error(`[Match Start] Error adding user ${userId} to waitlist:`, waitlistError);
@@ -269,49 +250,42 @@ router.post('/start', authenticateToken, async (req: any, res: Response, next: N
  *       404: { description: 'User not found or not currently searching' }
  *       500: { description: 'Server error' }
  */
-router.get('/check', authenticateToken, async (req: any, res: Response, next: NextFunction) => {
-    // Access req.user, check for its existence and properties
+// @ts-ignore
+router.get('/check', authenticateToken, async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user || typeof req.user.userId !== 'number') {
-        return res.status(401).json({ message: 'Unauthorized: Invalid user data in token.' });
+        return res.status(401).json({ message: 'Unauthorized: Invalid user data.' });
     }
     const femaleUserId = req.user.userId;
     console.log(`[GET /api/matches/check] Female user ${femaleUserId} checking for match.`);
 
-    // Get Sequelize instance for transaction and random function
-    const sequelize = db.sequelize; // Assuming db object holds the sequelize instance
+    const sequelize = db.sequelize;
 
     try {
-        // Find one random male user from the waitlist
         const availableMale = await MatchingWaitList.findOne({
             where: { gender: 'male' },
-            // Use sequelize.random() for cross-DB compatibility (or specific function like fn('RAND') for MySQL)
             order: sequelize.random(), 
-            include: [{ model: User, as: 'User', attributes: ['id'] }] // Include User just to confirm, only need id
+            include: [{ model: User, as: 'User', attributes: ['id'] }]
         });
 
         if (!availableMale) {
-            // No male user waiting
             console.log(`[Match Check] No male users waiting for female user ${femaleUserId}.`);
-            return res.status(204).send(); // No Content
+            return res.status(204).send();
         }
 
         const maleUserId = availableMale.userId;
         console.log(`[Match Check] Found available male user ${maleUserId} for female user ${femaleUserId}. Attempting to create match.`);
 
-        // --- Match Found - Create Match and Remove from Waitlist (Transaction) --- 
-        const result = await sequelize.transaction(async (t: any) => { // Use 'any' or import Transaction type
-            // 1. Create the Match record
+        const result = await sequelize.transaction(async (t: any) => {
             const matchId = `match-${femaleUserId}-${maleUserId}-${Date.now()}`;
             const newMatch = await Match.create({
                 matchId: matchId,
-                user1Id: femaleUserId, // User who initiated the check
-                user2Id: maleUserId,   // The matched user
+                user1Id: femaleUserId,
+                user2Id: maleUserId,
                 isActive: true,
                 status: 'active' 
             }, { transaction: t });
             console.log(`[Match Check Transaction] Created Match: ${matchId}`);
 
-            // 2. Remove BOTH users from the waitlist
             const deletedCount = await MatchingWaitList.destroy({
                 where: {
                     userId: [femaleUserId, maleUserId]
@@ -320,24 +294,16 @@ router.get('/check', authenticateToken, async (req: any, res: Response, next: Ne
             });
             console.log(`[Match Check Transaction] Removed ${deletedCount} entries from MatchingWaitList.`);
             
-            // Check if expected number of entries were removed
-            if (deletedCount < 2) { // Should ideally remove 2 entries
-                // This might happen in rare race conditions, log a warning
+            if (deletedCount < 2) {
                 console.warn(`[Match Check Transaction] Warning: Expected to remove 2 waitlist entries, but removed ${deletedCount}.`);
-                // Depending on policy, you might want to throw an error here to rollback
-                // throw new Error('Failed to remove both users from waitlist correctly.');
             }
 
-            // 3. Return the matchId from the transaction
             return newMatch.matchId;
         });
-        // --- Transaction End --- 
 
         console.log(`[Match Check] Successfully created match ${result} for users ${femaleUserId} and ${maleUserId}.`);
 
-        // --- Notify users via WebSocket --- 
         try {
-            // Find sockets for both users
             let femaleSocketId: string | null = null;
             let maleSocketId: string | null = null;
             for (const [socketId, connectedUser] of connectedUsers.entries()) {
@@ -347,7 +313,7 @@ router.get('/check', authenticateToken, async (req: any, res: Response, next: Ne
                 if (connectedUser.userId === maleUserId) {
                     maleSocketId = socketId;
                 }
-                if (femaleSocketId && maleSocketId) break; // Found both
+                if (femaleSocketId && maleSocketId) break;
             }
 
             const updatePayload = { status: 'matched', matchId: result };
@@ -363,18 +329,15 @@ router.get('/check', authenticateToken, async (req: any, res: Response, next: Ne
         } catch (socketError) {
             console.error("[Match Check] Error emitting WebSocket update:", socketError);
         }
-        // ----------------------------------
 
-        // Return the new match ID
-        res.status(200).json({ matchId: result });
+        return res.status(200).json({ matchId: result });
 
     } catch (error: any) {
         console.error(`[GET /api/matches/check] Error for user ${femaleUserId}:`, error);
-        // Check if it's a transaction rollback error or something else
         if (error.message.includes('Transaction Rollback') || (error.original && error.original.message)) {
              console.error('[Match Check] Transaction failed:', error.original || error.message);
         }
-        next(error); // Pass to global error handler
+        next(error);
     }
 });
 
@@ -392,7 +355,11 @@ router.get('/check', authenticateToken, async (req: any, res: Response, next: Ne
  *       404: { description: 'User not found or was not searching' }
  *       500: { description: 'Server error' }
  */
-router.post('/stop', authenticateToken, async (req: any, res: Response, next: NextFunction) => {
+// @ts-ignore
+router.post('/stop', authenticateToken, async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user || typeof req.user.userId !== 'number') {
+        return res.status(401).json({ message: 'Unauthorized: Invalid user data.' });
+    }
     const userId = req.user?.userId;
     console.log(`[POST /api/matches/stop] User ${userId} requested to stop searching.`);
 
@@ -401,13 +368,11 @@ router.post('/stop', authenticateToken, async (req: any, res: Response, next: Ne
     }
 
     try {
-        // Remove user from waitlist
         const deletedCount = await MatchingWaitList.destroy({ where: { userId } });
 
         if (deletedCount > 0) {
             console.log(`[Match Stop] User ${userId} removed from waitlist.`);
 
-            // --- Notify user via WebSocket --- 
             try {
                 let userSocketId: string | null = null;
                 for (const [socketId, connectedUser] of connectedUsers.entries()) {
@@ -417,19 +382,17 @@ router.post('/stop', authenticateToken, async (req: any, res: Response, next: Ne
                     }
                 }
                 if (userSocketId) {
-                    io.to(userSocketId).emit('match_update', { status: 'idle' }); // Send idle status
+                    io.to(userSocketId).emit('match_update', { status: 'idle' });
                     console.log(`[Match Stop] Sent match_update (idle) to user ${userId}.`);
                 }
             } catch (socketError) {
                  console.error("[Match Stop] Error emitting WebSocket update:", socketError);
             }
-            // ----------------------------------
 
-            res.status(200).json({ message: 'Stopped searching for a match.' });
+            return res.status(200).json({ message: 'Stopped searching for a match.' });
         } else {
             console.log(`[Match Stop] User ${userId} was not found on the waitlist.`);
-            // No need to emit if user wasn't waiting
-            res.status(200).json({ message: 'You were not actively searching.' }); 
+            return res.status(200).json({ message: 'You were not actively searching.' }); 
         }
 
     } catch (error) {

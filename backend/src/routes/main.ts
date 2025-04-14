@@ -21,11 +21,6 @@ interface ButtonStateResponse {
     matchId: string | null;
 }
 
-// Define the expected type for the request object after authentication
-interface AuthenticatedRequest extends Request {
-    user?: { userId: number };
-}
-
 /**
  * @swagger
  * /api/main/button-state:
@@ -64,7 +59,7 @@ interface AuthenticatedRequest extends Request {
  */
 
 // Apply middleware and then the handler
-router.get('/button-state', authenticateToken as express.RequestHandler, (async (req: AuthenticatedRequest, res: Response<ButtonStateResponse>, next: NextFunction) => {
+router.get('/button-state', authenticateToken as express.RequestHandler, (async (req: Request, res: Response<ButtonStateResponse>, next: NextFunction): Promise<void> => {
     // Type assertion is less safe, prefer optional chaining if possible
     const userId = req.user?.userId;
 
@@ -79,7 +74,8 @@ router.get('/button-state', authenticateToken as express.RequestHandler, (async 
 
         if (!user) {
             // Use status 404 for not found
-            return res.status(404).json({ message: 'User not found' } as any); 
+            res.status(404).json({ message: 'User not found' } as any);
+            return; // Add explicit return
         }
 
         // --- Log retrieved user data --- 

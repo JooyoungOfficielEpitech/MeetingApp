@@ -10,21 +10,34 @@ const User = db.User;
 export function configurePassport() {
     // Serialization
     passport.serializeUser((user: any, done) => {
-        console.log('[Passport Serialize] User ID:', user.id);
-        done(null, user.id);
+        const userId = user?.id; // Prefer id from model if available
+        if (!userId) {
+             console.error('[Passport Serialize] Error: Cannot serialize user without ID.');
+             return done(new Error('Cannot serialize user without ID.'));
+        }
+        console.log('[Passport Serialize] User ID:', userId);
+        done(null, userId);
     });
 
     // Deserialization
-    passport.deserializeUser(async (id: string, done) => {
+    passport.deserializeUser(async (id: number, done) => { // Assuming id is a number
         console.log('[Passport Deserialize] Looking for user ID:', id);
         try {
             const user = await User.findByPk(id); // User is now defined via require
             if (user) {
                 console.log('[Passport Deserialize] User found:', user.toJSON());
+                 // Construct a plain object matching AuthenticatedRequest user structure
+                 const userData = {
+                     userId: user.id, // Map id to userId
+                     email: user.email,
+                     status: user.status,
+                     // Include any other necessary properties from the JWT payload/AuthenticatedRequest
+                 };
+                 done(null, userData); // Pass the structured plain object
             } else {
                 console.warn('[Passport Deserialize] User NOT found for ID:', id);
+                done(null, null); // Pass null if user not found
             }
-            done(null, user); // Pass user object (or null if not found)
         } catch (error) {
             console.error('[Passport Deserialize] Error:', error);
             done(error);
