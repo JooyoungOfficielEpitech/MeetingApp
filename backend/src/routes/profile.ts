@@ -9,6 +9,7 @@ const db = require('../../models');
 const User = db.User;
 const Match = db.Match;
 const { Op } = require("sequelize");
+const MatchingWaitList = db.MatchingWaitList;
 
 // --- ★ Define Request Type Structure Locally ★ ---
 interface AuthenticatedRequestWithFiles extends Request {
@@ -275,25 +276,78 @@ router.delete('/me', authenticateToken, (async (req: Request, res: Response, nex
             return res.status(404).json({ message: 'User not found' });
         }
 
-        // Soft delete the user
-        await user.destroy(); // This triggers soft delete due to paranoid: true
-        console.log(`User ${userId} soft deleted (deletedAt set).`);
+        // --- START: Hard Delete Logic ---
+        console.log(`[User Delete] User ${userId} requested permanent deletion.`);
+        const uploadsBaseDir = path.join(__dirname, '..', '..', 'uploads'); // Define base path
 
-        // Deactivate active matches involving this user
-        console.log(`Deactivating active matches for user ${userId}...`);
-        const [updateCount] = await Match.update(
-            { isActive: false },
-            {
+        // --- 1. Delete Associated Files ---
+        const filesToDelete: string[] = [];
+        if (user.profileImageUrls && Array.isArray(user.profileImageUrls)) {
+            user.profileImageUrls.forEach((relativeUrl: string) => {
+                if (relativeUrl && typeof relativeUrl === 'string') {
+                    const filePathPart = relativeUrl.startsWith('/uploads/') ? relativeUrl.substring('/uploads/'.length) : relativeUrl;
+                    filesToDelete.push(path.join(uploadsBaseDir, filePathPart));
+                }
+            });
+        }
+        if (user.businessCardImageUrl && typeof user.businessCardImageUrl === 'string') {
+            const filePathPart = user.businessCardImageUrl.startsWith('/uploads/') ? user.businessCardImageUrl.substring('/uploads/'.length) : user.businessCardImageUrl;
+            filesToDelete.push(path.join(uploadsBaseDir, filePathPart));
+        }
+        // Also delete old single profile picture if exists
+        if (user.profilePictureUrl && typeof user.profilePictureUrl === 'string') {
+             const filePathPart = user.profilePictureUrl.startsWith('/uploads/') ? user.profilePictureUrl.substring('/uploads/'.length) : user.profilePictureUrl;
+             filesToDelete.push(path.join(uploadsBaseDir, filePathPart));
+        }
+
+        console.log(`[User Delete] Attempting to delete files for user ${userId}:`, filesToDelete);
+        filesToDelete.forEach(filePath => {
+            if (fs.existsSync(filePath)) {
+                try {
+                    fs.unlinkSync(filePath);
+                    console.log(`[User Delete] Successfully deleted file: ${filePath}`);
+                } catch (unlinkError) {
+                    console.error(`[User Delete] Error deleting file ${filePath}:`, unlinkError);
+                    // Decide if this error should stop the whole process
+                }
+            } else {
+                console.warn(`[User Delete] File not found, skipping deletion: ${filePath}`);
+            }
+        });
+        // --- End File Deletion ---
+
+        // --- 2. Delete Associated Matches ---
+        console.log(`[User Delete] Deleting matches associated with user ${userId}.`);
+        try {
+            const deletedMatchesCount = await Match.destroy({
                 where: {
                     [Op.or]: [
                         { user1Id: userId },
                         { user2Id: userId }
-                    ],
-                    isActive: true
+                    ]
                 }
-            }
-        );
-        console.log(`Deactivated ${updateCount} active matches for user ${userId}.`);
+            });
+            console.log(`[User Delete] Deleted ${deletedMatchesCount} matches associated with user ${userId}.`);
+        } catch (matchError) {
+            console.error(`[User Delete] Error deleting matches for user ${userId}:`, matchError);
+            // Decide if you want to stop the user deletion process if match deletion fails
+            // Maybe wrap steps 2, 3, 4 in a transaction? For now, log and continue.
+        }
+        // --- End Match Deletion ---
+
+        // --- 3. Remove from MatchingWaitList if present ---
+         try {
+             await MatchingWaitList.destroy({ where: { userId: userId } });
+             console.log(`[User Delete] Removed user ${userId} from MatchingWaitList (if existed).`);
+         } catch (waitlistError) {
+             console.error(`[User Delete] Error removing user ${userId} from MatchingWaitList:`, waitlistError);
+         }
+         // -------------------------------------------
+
+        // --- 4. Hard delete the user record ---
+        await user.destroy({ force: true }); // Use force: true to bypass paranoid mode
+        console.log(`User ${userId} permanently deleted from database.`);
+        // --- END: Hard Delete Logic ---
 
         // Respond with success (No Content)
         return res.status(204).send();
