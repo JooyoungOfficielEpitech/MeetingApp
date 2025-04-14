@@ -1,14 +1,28 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useForm } from 'react-hook-form'; // React Hook Form 사용
 import { LockClosedIcon, EnvelopeIcon, ShieldCheckIcon } from '@heroicons/react/24/outline';
 import { Montserrat, Inter } from 'next/font/google'; // Import fonts
+import axiosInstance from '@/utils/axiosInstance'; // axiosInstance 추가
+import axios from 'axios';
 
 // Initialize fonts
 const montserrat = Montserrat({ subsets: ['latin'], weight: ['700', '800'] }); // Bold weights
 const inter = Inter({ subsets: ['latin'] });
+
+// 로그인 응답 인터페이스 정의
+interface LoginResponse {
+    token: string;
+    user?: {
+        id: string | number;
+        gender?: string;
+    };
+    redirectUrl?: string;
+    message?: string;
+}
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -37,52 +51,46 @@ export default function LoginPage() {
     console.log('Attempting general user login');
 
     try {
-        const response = await fetch('http://localhost:3001/api/auth/login', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ email, password }),
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            throw new Error(data.message || 'Login failed. Please check your email or password.');
-        }
-
-        console.log('Login successful:', data);
-
-        // --- Store the JWT Token and User ID --- 
-        if (data.token && data.user && data.user.id) {
-            localStorage.setItem('authToken', data.token);
-            localStorage.setItem('userId', data.user.id.toString());
-            // Store gender as well
-            if (data.user.gender) {
-                 localStorage.setItem('userGender', data.user.gender);
-            } else {
-                 // Handle case where gender might be null/missing after login
-                 localStorage.removeItem('userGender'); 
-            }
-            console.log('Token, userId, and userGender stored in localStorage');
-            
-            // --- Always redirect to main page after successful login ---
-            console.log('Login successful, redirecting to main page.');
-            alert('Login successful!'); // Keep success alert
-            router.push('/main'); // Redirect to main application page
-            // ---------------------------------------------------------
-            
-        } else {
-            console.warn('No token or user ID received from server', data);
-            throw new Error('Login response is missing token or user ID.');
-        }
-        // --------------------------- 
-
-    } catch (error: any) {
-        console.error('Login Error:', error);
-        setError(error.message || 'An error occurred during login.');
-    } finally {
+        const response = await axiosInstance.post<LoginResponse>('/api/auth/login', { email, password });
+        
+        // 응답 처리
+        console.log('Login successful');
         setIsLoading(false);
+        
+        // 로그인 성공 시 토큰 저장
+        if (response.data.token) {
+            localStorage.setItem('token', response.data.token);
+            
+            // 사용자 ID가 있다면 저장
+            if (response.data.user?.id) {
+                localStorage.setItem('userId', response.data.user.id.toString());
+                
+                // 성별 정보가 있다면 저장
+                if (response.data.user.gender) {
+                    localStorage.setItem('userGender', response.data.user.gender);
+                }
+            }
+        }
+        
+        // 리디렉션 처리
+        if (response.data.redirectUrl) {
+            router.push(response.data.redirectUrl);
+        } else {
+            // 기본 리디렉션 경로 (원래 코드에 맞게 /main으로 변경)
+            router.push('/main');
+            alert('로그인 성공!');
+        }
+    } catch (error: any) {
+        console.error('Login failed:', error);
+        setIsLoading(false);
+        
+        if (error.response) {
+            // 서버 응답이 있는 경우
+            setError(error.response.data.message || '로그인에 실패했습니다');
+        } else {
+            // 서버 응답이 없는 경우
+            setError('로그인 중 오류가 발생했습니다. 나중에 다시 시도해주세요.');
+        }
     }
   };
 
@@ -90,7 +98,7 @@ export default function LoginPage() {
   const inputBaseStyle = "w-full p-3 pl-10 rounded-full bg-slate-700 text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500 border border-slate-600 focus:border-amber-500 transition-colors"; // Fully rounded inputs
   const labelStyle = "block text-sm font-medium text-slate-400 mb-1.5";
   const buttonBaseStyle = "w-full py-3 px-4 rounded-full font-semibold transition-colors duration-200"; // Fully rounded button
-  const iconWrapperStyle = "absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none";
+  const iconWrapperStyle = "absolute inset-0 left-0 pl-3 flex items-center pointer-events-none";
 
   return (
     <div className={`min-h-screen bg-black text-slate-100 flex items-center justify-center py-16 px-4 sm:px-6 lg:px-8 ${inter.className}`}> {/* Apply Inter font globally */}
@@ -219,7 +227,7 @@ export default function LoginPage() {
         {/* --- Social Login Buttons --- */}
         <div>
           <a 
-            href="http://localhost:3001/api/auth/google" // Link to backend Google auth route
+            href={`${axiosInstance.defaults.baseURL}/api/auth/google`} // Link to backend Google auth route
             className={`${buttonBaseStyle} mt-3 flex items-center justify-center bg-red-600 hover:bg-red-700 text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-800 focus:ring-red-500`}
           >
              {/* Simple Google Icon Placeholder */} 
@@ -235,7 +243,7 @@ export default function LoginPage() {
 
           {/* ★ Kakao Login Button ★ */}
           <a
-            href="http://localhost:3001/api/auth/kakao" // Link to backend Kakao auth route
+            href={`${axiosInstance.defaults.baseURL}/api/auth/kakao`} // Link to backend Kakao auth route
             className={`${buttonBaseStyle} mt-3 flex items-center justify-center bg-[#FEE500] hover:bg-[#F7D600] text-black focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-800 focus:ring-[#FEE500]`}
           >
              {/* Kakao Icon Placeholder */}

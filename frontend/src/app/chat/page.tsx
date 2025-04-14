@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import io, { Socket } from 'socket.io-client';
 import { ArrowLeftIcon, PaperAirplaneIcon, ArrowLeftOnRectangleIcon } from '@heroicons/react/24/solid';
 import { Montserrat, Inter } from 'next/font/google';
+import axiosInstance from '@/utils/axiosInstance';
 
 // Initialize fonts
 const montserrat = Montserrat({ subsets: ['latin'], weight: ['600', '700'] });
@@ -44,15 +45,15 @@ function ChatContent() {
     // --- Fetch current user ID & Handle URL Token --- 
     useEffect(() => {
         const tokenFromUrl = searchParams.get('token');
-        let initialToken = localStorage.getItem('authToken');
+        let initialToken = localStorage.getItem('token');
         let userIdFromStorage = localStorage.getItem('userId');
 
         // If token exists in URL (e.g., from Google redirect with active match)
         if (tokenFromUrl) {
-            console.log('ChatPage: Token found in URL, saving...');
-            localStorage.setItem('authToken', tokenFromUrl);
+            console.log('ChatPage: Token found in URL, saving to localStorage.');
+            localStorage.setItem('token', tokenFromUrl);
             initialToken = tokenFromUrl;
-            // Clear token from URL
+            // Clean URL
             const newUrl = new URL(window.location.href);
             newUrl.searchParams.delete('token');
             router.replace(newUrl.pathname + newUrl.search, { scroll: false });
@@ -74,14 +75,9 @@ function ChatContent() {
             // If no userId in storage BUT we have a token (from URL or existing storage)
             // Fetch userId using the token
             console.log('ChatPage: No userId in storage, fetching user info with token...');
-            fetch('http://localhost:3001/api/users/me', {
-                 headers: { 'Authorization': `Bearer ${initialToken}` }
-             })
-             .then(async res => {
-                 if (!res.ok) throw new Error('Failed to fetch user info for ID');
-                 return res.json();
-             })
-             .then(userInfo => {
+            axiosInstance.get('/api/users/me')
+             .then(response => {
+                 const userInfo = response.data as { id: number };
                  if (userInfo && userInfo.id) {
                      localStorage.setItem('userId', userInfo.id.toString());
                      setCurrentUserId(userInfo.id);
@@ -93,7 +89,7 @@ function ChatContent() {
              .catch(err => {
                   console.error("ChatPage: Error fetching user info:", err);
                   setError("사용자 정보를 가져오는 데 실패했습니다. 다시 로그인해주세요.");
-                  localStorage.removeItem('authToken'); // Clear potentially invalid token
+                  localStorage.removeItem('token'); // Clear potentially invalid token
              });
         } else {
             // No token and no userId
@@ -112,10 +108,11 @@ function ChatContent() {
             return; 
         }
         
-        const token = localStorage.getItem('authToken'); // Get potentially updated token
+        const token = localStorage.getItem('token'); // Get potentially updated token
         if (!token) {
-             // This case should ideally be caught by the previous useEffect
-             setError("인증 토큰이 없습니다. 로그인이 필요합니다.");
+             console.error('ChatPage: No authentication token found.');
+             setError('로그인이 필요합니다. 로그인 페이지로 이동합니다.');
+             router.push('/');
              return;
         }
         
@@ -124,7 +121,8 @@ function ChatContent() {
         setNotification(null);
 
         // Connect to Socket.IO server
-        socketRef.current = io('http://localhost:3001', { // Replace with your backend URL if different
+        const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
+        socketRef.current = io(socketUrl, { // Use environment variable
             auth: { token },
             query: { matchId } // Send matchId in query
         });

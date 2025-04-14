@@ -33,7 +33,7 @@ export default function MatchingPage() {
     setError(null); // Clear previous errors
 
     // Retrieve token from local storage
-    const token = localStorage.getItem('authToken');
+    const token = localStorage.getItem('token');
     if (!token) {
       console.error('MatchingPage: No auth token found. Redirecting to login.');
       setError('Authentication token not found. Login required.');
@@ -45,7 +45,8 @@ export default function MatchingPage() {
 
     // Connect to the Socket.IO server
     // Ensure the URL points to your backend server
-    socketRef.current = io('http://localhost:3001', { // Replace with your backend URL
+    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
+    socketRef.current = io(socketUrl, { // Use environment variable
       auth: { token },
       reconnectionAttempts: 3, // Limit reconnection attempts
     });

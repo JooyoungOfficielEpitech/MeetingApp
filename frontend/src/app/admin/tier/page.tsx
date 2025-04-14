@@ -416,9 +416,9 @@ const AdminTierPage: React.FC = () => {
                                              <div className={styles.imageGrid}>
                                                 {detailedUser.profileImageUrls && detailedUser.profileImageUrls.length > 0 ? (
                                                     detailedUser.profileImageUrls.map((url, index) => (
-                                                        <a key={index} href={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${url}`} target="_blank" rel="noopener noreferrer" className={styles.imageLink}>
+                                                        <a key={index} href={`${axiosInstance.defaults.baseURL}${url}`} target="_blank" rel="noopener noreferrer" className={styles.imageLink}>
                                                             <img 
-                                                                src={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${url}`} 
+                                                                src={`${axiosInstance.defaults.baseURL}${url}`} 
                                                                 alt={`Profile ${index + 1}`} 
                                                                 className={styles.modalImage} 
                                                                 onError={(e) => (e.currentTarget.src = '/default-avatar.png')} 
@@ -435,9 +435,9 @@ const AdminTierPage: React.FC = () => {
                                         <div className={styles.detailSection}>
                                             <h4>Business Card / Occupation Proof</h4>
                                              {detailedUser.businessCardImageUrl ? (
-                                                <a href={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${detailedUser.businessCardImageUrl}`} target="_blank" rel="noopener noreferrer">
+                                                <a href={`${axiosInstance.defaults.baseURL}${detailedUser.businessCardImageUrl}`} target="_blank" rel="noopener noreferrer">
                                                     <img 
-                                                        src={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${detailedUser.businessCardImageUrl}`} 
+                                                        src={`${axiosInstance.defaults.baseURL}${detailedUser.businessCardImageUrl}`} 
                                                         alt="Business Card" 
                                                         className={styles.modalImage} 
                                                         style={{ maxWidth: '200px', height: 'auto'}}

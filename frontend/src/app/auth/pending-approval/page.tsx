@@ -16,8 +16,8 @@ export default function PendingApprovalPage() {
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
-    const token = localStorage.getItem('authToken');
-    const userStatus = localStorage.getItem('userStatus');
+    const token = localStorage.getItem('token');
+    const userStatus = localStorage.getItem('user');
 
     if (userStatus === 'active') {
       console.log('[Pending Page] Status already active, redirecting to main.');
@@ -32,7 +32,8 @@ export default function PendingApprovalPage() {
 
     if (!socketRef.current) {
         console.log('[Pending Page] Initializing WebSocket connection...');
-        socketRef.current = io('http://localhost:3001', { auth: { token } });
+        const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
+        socketRef.current = io(socketUrl, { auth: { token } });
 
         const socket = socketRef.current;
 
@@ -44,14 +45,14 @@ export default function PendingApprovalPage() {
             console.log('[Pending Page] Received userApproved event:', data);
             if (data && data.token) {
                 alert('Your account has been approved! Redirecting...');
-                localStorage.setItem('authToken', data.token);
-                localStorage.setItem('userStatus', 'active');
+                localStorage.setItem('token', data.token);
+                localStorage.setItem('user', 'active');
                 router.replace('/main');
             } else {
                 console.error('[Pending Page] "userApproved" event received without new token.');
                 alert('Approval processed, but session update failed. Please try logging in manually.');
-                localStorage.removeItem('authToken');
-                localStorage.removeItem('userStatus');
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
                 localStorage.removeItem('userId');
                 localStorage.removeItem('userGender');
                 router.push('/');
@@ -64,8 +65,8 @@ export default function PendingApprovalPage() {
             const baseMessage = data?.message || 'Your account registration was rejected.';
             const finalMessage = customReason ? `${baseMessage}\n\nReason: ${customReason}` : baseMessage;
             alert(finalMessage);
-            localStorage.removeItem('authToken');
-            localStorage.removeItem('userStatus');
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
             localStorage.removeItem('userId');
             localStorage.removeItem('userGender');
             socket.disconnect();

@@ -29,15 +29,15 @@ function AuthStatusRedirect({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
   useEffect(() => {
-    const authToken = localStorage.getItem('authToken');
-    console.log(`[Layout Check] Path: ${pathname}, Token: ${!!authToken}`);
+    const token = localStorage.getItem('token');
+    console.log(`[Layout Check] Path: ${pathname}, Token: ${!!token}`);
 
     // Define paths accessible without login
     const publicPaths = ['/', '/signup', '/auth/callback', '/auth/pending-approval', '/signup/complete-profile']; // Added pending-approval and complete-profile
     const isPublicPath = publicPaths.includes(pathname);
 
     // If user is not logged in and trying to access a non-public page, redirect to login
-    if (!authToken && !isPublicPath) {
+    if (!token && !isPublicPath) {
        console.log('[Layout Check] No token and not public path, redirecting to login.');
        router.replace('/');
     }

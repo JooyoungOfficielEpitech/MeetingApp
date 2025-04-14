@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link'; // For navigation links
 import { UserCircleIcon, CakeIcon, ArrowsUpDownIcon, TagIcon, IdentificationIcon } from '@heroicons/react/24/outline'; // Added more icons
 import { Montserrat, Inter } from 'next/font/google'; // Import fonts
+import axiosInstance from '@/utils/axiosInstance'; // axios 인스턴스 import 추가
 
 const inter = Inter({ subsets: ['latin'] });
 const montserrat = Montserrat({ subsets: ['latin'], weight: ['700', '800'] }); // Make sure font is initialized
@@ -77,76 +78,47 @@ function ProfileContent() {
         setError(null);
 
         try {
-            const response = await fetch('http://localhost:3001/api/profile/me', {
-                method: 'GET',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                },
-            });
+            const response = await axiosInstance.get<UserProfile>('/api/profile/me');
 
             if (response.status === 401 || response.status === 403) {
-                localStorage.removeItem('authToken');
-                localStorage.removeItem('userInfo');
-                setError('인증이 만료되었거나 유효하지 않습니다. 다시 로그인해주세요.');
-                alert('인증이 만료되었거나 유효하지 않습니다. 다시 로그인해주세요.');
-                router.replace('/');
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                router.push('/login');
                 return;
             }
 
-            if (response.status === 404) {
-                console.log('ProfilePage: User not found (404), likely new user or invalid token for ID. Entering edit mode.');
-                localStorage.removeItem('authToken');
-                localStorage.removeItem('userId');
-                setUserProfile(null);
-                setCurrentUserId(null);
-                setFormData({
-                    name: '', dob: '', height: '', gender: '', mbti: '',
-                    weight: '', phone: '', address1: '', address2: '',
-                    occupation: '', income: ''
-                });
-                setIsEditing(true);
-                alert("환영합니다! 프로필 정보를 완성해주세요.");
-                return;
-            }
+            const userData: UserProfile = response.data;
+            setUserProfile(userData);
 
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ message: '프로필 정보를 가져오는데 실패했습니다.' }));
-                throw new Error(errorData.message || '프로필 정보를 가져오는데 실패했습니다.');
-            }
-
-            const data: UserProfile = await response.json();
-            setUserProfile(data);
-
-            if (data && data.id) {
-                localStorage.setItem('userId', data.id.toString());
-                setCurrentUserId(data.id);
-                console.log('ProfilePage: Fetched user data and stored userId:', data.id);
+            if (userData && userData.id) {
+                localStorage.setItem('userId', userData.id.toString());
+                setCurrentUserId(userData.id);
+                console.log('ProfilePage: Fetched user data and stored userId:', userData.id);
             } else {
                 console.error("ProfilePage: User ID missing in fetched profile data.");
                 setError('사용자 정보를 불러왔지만 ID가 없습니다. 다시 로그인해주세요.');
                 setUserProfile(null);
-                localStorage.removeItem('authToken');
+                localStorage.removeItem('token');
                 localStorage.removeItem('userId');
                 router.replace('/');
                 return;
             }
 
             setFormData({
-                name: data.name || '',
-                dob: data.dob ? data.dob.split('T')[0] : '',
-                height: data.height?.toString() || '',
-                gender: data.gender || '',
-                mbti: data.mbti || '',
-                weight: data.weight?.toString() || '',
-                phone: data.phone || '',
-                address1: data.address1 || '',
-                address2: data.address2 || '',
-                occupation: data.occupation || '',
-                income: data.income || '',
+                name: userData.name || '',
+                dob: userData.dob ? userData.dob.split('T')[0] : '',
+                height: userData.height?.toString() || '',
+                gender: userData.gender || '',
+                mbti: userData.mbti || '',
+                weight: userData.weight?.toString() || '',
+                phone: userData.phone || '',
+                address1: userData.address1 || '',
+                address2: userData.address2 || '',
+                occupation: userData.occupation || '',
+                income: userData.income || '',
             });
 
-            if (!data.gender) {
+            if (!userData.gender) {
                 console.log("Profile incomplete (gender missing), entering edit mode.");
                 setIsEditing(true);
                 alert("프로필 정보를 완성해주세요! (특히 성별)");
@@ -173,7 +145,7 @@ function ProfileContent() {
 
         if (tokenFromUrl) {
             console.log('ProfilePage: Token found in URL, saving to localStorage.');
-            localStorage.setItem('authToken', tokenFromUrl);
+            localStorage.setItem('token', tokenFromUrl);
             activeToken = tokenFromUrl; // Use this token immediately
 
             // Clean URL
@@ -182,7 +154,7 @@ function ProfileContent() {
             router.replace(newUrl.pathname + newUrl.search, { scroll: false }); // Use router.replace for cleaner URL update
 
         } else {
-            activeToken = localStorage.getItem('authToken');
+            activeToken = localStorage.getItem('token');
         }
 
         // Fetch profile using the determined token
@@ -191,8 +163,8 @@ function ProfileContent() {
     }, [searchParams, router, fetchUserProfile]); // Add fetchUserProfile to dependency array
 
     const handleLogout = () => {
-        localStorage.removeItem('authToken');
-        localStorage.removeItem('userInfo');
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
         localStorage.removeItem('userId'); // Ensure userId is also removed
         alert('로그아웃 되었습니다.');
         router.push('/'); 
@@ -208,7 +180,7 @@ function ProfileContent() {
 
         setIsSaving(true); // Reuse saving state for loading indicator
         setError(null);
-        const token = localStorage.getItem('authToken');
+        const token = localStorage.getItem('token');
 
         if (!token) {
             setError('로그인이 필요합니다.');
@@ -218,39 +190,33 @@ function ProfileContent() {
         }
 
         try {
-            const response = await fetch('http://localhost:3001/api/profile/me', {
-                method: 'DELETE',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                },
-            });
+            const response = await axiosInstance.delete('/api/profile/me');
 
             if (response.status === 204) {
-                // Success: Clear local storage and redirect
-                localStorage.removeItem('authToken');
-                localStorage.removeItem('userInfo');
+                // 계정 삭제 성공
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
                 localStorage.removeItem('userId');
                 alert('회원 탈퇴가 완료되었습니다.');
                 router.push('/'); // Redirect to login page
             } else if (response.status === 401 || response.status === 403) {
-                localStorage.removeItem('authToken');
-                localStorage.removeItem('userInfo');
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
                 localStorage.removeItem('userId');
-                setError('인증 오류로 탈퇴 처리 중 문제가 발생했습니다. 다시 로그인해주세요.');
-                alert('인증 오류로 탈퇴 처리 중 문제가 발생했습니다. 다시 로그인해주세요.');
-                router.replace('/');
+                setError('인증에 문제가 생겼습니다. 다시 로그인해주세요.');
+                alert('인증에 문제가 생겼습니다. 다시 로그인해주세요.');
+                router.push('/');
             } else {
-                // Handle other errors (e.g., 404 Not Found, 500 Server Error)
-                const errorData = await response.json().catch(() => ({ message: '회원 탈퇴 처리 중 오류가 발생했습니다.' }));
-                throw new Error(errorData.message || '회원 탈퇴 처리 중 알 수 없는 오류가 발생했습니다.');
+                // 기타 오류 처리
+                setError(`계정 삭제 중 오류가 발생했습니다: ${response.status}`);
+                alert(`계정 삭제 중 오류가 발생했습니다: ${response.status}`);
             }
-
         } catch (err: any) {
             console.error('Failed to delete account:', err);
-            setError(err.message || '회원 탈퇴 중 오류 발생');
-            alert(`오류: ${err.message || '회원 탈퇴 중 오류 발생'}`);
+            setError(err.message || '알 수 없는 오류가 발생했습니다.');
+            alert(err.message || '알 수 없는 오류가 발생했습니다.');
         } finally {
-            setIsSaving(false); // Stop loading indicator
+            setIsSaving(false);
         }
     };
     // --------------------------------
@@ -264,85 +230,66 @@ function ProfileContent() {
     // Handle saving profile changes
     const handleSave = async (e: FormEvent) => {
         e.preventDefault();
+        if (isSaving) return; // Prevent duplicate submissions
         setIsSaving(true);
         setError(null);
-        const token = localStorage.getItem('authToken');
 
-        if (!token) {
-            setError('로그인이 필요합니다. 로그인 페이지로 이동합니다.');
-            alert('로그인이 필요합니다. 로그인 페이지로 이동합니다.');
-            router.replace('/');
-            return;
-        }
-
-        // Construct the data to send, only include non-empty gender
-        const dataToSend: Partial<Record<keyof ProfileFormData, any>> = { // Use a more flexible type
-            name: formData.name || null,
+        // Convert string values to appropriate types before saving
+        const dataToSend = {
+            name: formData.name,
             dob: formData.dob || null,
-            height: formData.height ? parseInt(formData.height, 10) : null,
-            // Include gender only if it has a value (not empty string)
-            ...(formData.gender && { gender: formData.gender }), 
-            mbti: formData.mbti ? formData.mbti.toUpperCase() : null,
-            weight: formData.weight ? parseFloat(formData.weight) : null,
+            height: formData.height ? parseInt(formData.height) : null,
+            gender: formData.gender || null,
+            mbti: formData.mbti || null,
+            weight: formData.weight ? parseInt(formData.weight) : null,
             phone: formData.phone || null,
             address1: formData.address1 || null,
             address2: formData.address2 || null,
             occupation: formData.occupation || null,
             income: formData.income || null,
         };
-        // Ensure gender is not sent as null if it's an empty string in the form
-        if (dataToSend.gender === '') {
-             delete dataToSend.gender;
-        }
-
-        console.log("Data being sent for PUT:", dataToSend); // Log data being sent
 
         try {
-            const response = await fetch('http://localhost:3001/api/profile/me', {
-                method: 'PUT',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(dataToSend),
-            });
+            const response = await axiosInstance.put('/api/profile/me', dataToSend);
 
-            if (response.status === 401 || response.status === 403) {
-                localStorage.removeItem('authToken');
-                localStorage.removeItem('userInfo');
+            if (response.status === 200) {
+                // 프로필 업데이트 성공
+                const updatedUserData = response.data as UserProfile;
+                setUserProfile(updatedUserData);
+                setIsEditing(false);
+
+                // 각 필드에 맞게 폼 데이터 업데이트
+                setFormData({
+                    name: updatedUserData.name || '',
+                    dob: updatedUserData.dob ? updatedUserData.dob.split('T')[0] : '',
+                    height: updatedUserData.height?.toString() || '',
+                    gender: updatedUserData.gender || '',
+                    mbti: updatedUserData.mbti || '',
+                    weight: updatedUserData.weight?.toString() || '',
+                    phone: updatedUserData.phone || '',
+                    address1: updatedUserData.address1 || '',
+                    address2: updatedUserData.address2 || '',
+                    occupation: updatedUserData.occupation || '',
+                    income: updatedUserData.income || '',
+                });
+
+                alert('프로필이 성공적으로 업데이트되었습니다.');
+            } else if (response.status === 401 || response.status === 403) {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
                 localStorage.removeItem('userId');
-                setError('인증이 만료되었거나 유효하지 않습니다. 다시 로그인해주세요.');
-                alert('인증이 만료되었거나 유효하지 않습니다. 다시 로그인해주세요.');
-                router.replace('/');
-                return;
+                setError('인증에 문제가 생겼습니다. 다시 로그인해주세요.');
+                alert('인증에 문제가 생겼습니다. 다시 로그인해주세요.');
+                router.push('/');
+            } else {
+                // 기타 오류
+                setError(`프로필 업데이트 중 오류가 발생했습니다: ${response.status}`);
+                alert(`프로필 업데이트 중 오류가 발생했습니다: ${response.status}`);
             }
-
-            if (!response.ok) {
-                let errorMessage = 'Failed to update profile';
-                try {
-                    const errorData = await response.json();
-                    if (errorData && errorData.message) {
-                        errorMessage = errorData.message;
-                    } else if (errorData && Array.isArray(errorData.errors)) {
-                        errorMessage = errorData.errors.map((e: any) => e.msg).join(', ');
-                    }
-                } catch { /* Ignore JSON parse error */ }
-                throw new Error(errorMessage);
-            }
-
-            const updatedUserProfile: UserProfile = await response.json();
-            setUserProfile(updatedUserProfile);
-            // Store gender in localStorage upon successful profile update
-            if (updatedUserProfile.gender) {
-                localStorage.setItem('userGender', updatedUserProfile.gender);
-                console.log('ProfilePage: User gender saved to localStorage:', updatedUserProfile.gender);
-            }
-            setIsEditing(false);
-            alert('Profile updated successfully!');
-
         } catch (err: any) {
-            console.error('Failed to save profile:', err);
-            setError(err.message || '프로필 저장 중 오류 발생');
+            console.error('프로필 업데이트 실패:', err);
+            setError(err.message || '알 수 없는 오류가 발생했습니다.');
+            alert(err.message || '알 수 없는 오류가 발생했습니다.');
         } finally {
             setIsSaving(false);
         }

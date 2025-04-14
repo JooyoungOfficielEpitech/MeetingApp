@@ -32,6 +32,9 @@ const MatchingWaitList = db.MatchingWaitList; // MatchingWaitList 모델 import
 
 const router = express.Router();
 
+// 파일 상단에 프론트엔드 URL을 위한 환경 변수 추가
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+
 // --- Moved Route for Social Login Profile Completion --- 
 
 /**
@@ -958,9 +961,9 @@ router.get('/google',
  *       302:
  *         description: >
  *           Redirects to frontend:
- *           - `http://localhost:3000/auth/callback?token=<jwt>` on successful login (profile complete).
- *           - `http://localhost:3000/signup/complete-profile` for new users or incomplete profiles.
- *           - `http://localhost:3000/?error=<error_message>` on authentication failure.
+ *           - `${FRONTEND_URL}/auth/callback?token=<jwt>` on successful login (profile complete).
+ *           - `${FRONTEND_URL}/signup/complete-profile` for new users or incomplete profiles.
+ *           - `${FRONTEND_URL}/?error=<error_message>` on authentication failure.
  */
 router.get('/google/callback',
     (req: any, res, next) => { // Logging middleware (optional but helpful)
@@ -970,7 +973,7 @@ router.get('/google/callback',
         next();
     },
     (req: any, res, next) => { // Custom authentication callback handler
-        passport.authenticate('google', { failureRedirect: 'http://localhost:3000/?error=google_auth_failed' }, // Basic failure redirect
+        passport.authenticate('google', { failureRedirect: `${FRONTEND_URL}/?error=google_auth_failed` }, // Basic failure redirect
             async (err: any, user: any, info: any) => {
                 console.log('\n--- Inside /auth/google/callback passport.authenticate ---');
                 console.log('Error:', err);
@@ -981,7 +984,7 @@ router.get('/google/callback',
                 if (err) {
                     console.error('Authentication Error from Google strategy:', err);
                     // Redirect with a generic error, or use err.message if available and safe
-                    return res.redirect(`http://localhost:3000/?error=google_auth_error`);
+                    return res.redirect(`${FRONTEND_URL}/?error=google_auth_error`);
                 }
 
                 if (user) {
@@ -1001,7 +1004,7 @@ router.get('/google/callback',
                         };
                         const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
                         console.log('Profile complete. Redirecting to /auth/callback with token containing status:', payload.status);
-                        return res.redirect(`http://localhost:3000/auth/callback?token=${token}`);
+                        return res.redirect(`${FRONTEND_URL}/auth/callback?token=${token}`);
                     } else {
                         // Profile incomplete: Redirect to complete profile page (use session)
                         console.log('Profile incomplete. Storing pending info and redirecting to /signup/complete-profile.');
@@ -1018,10 +1021,10 @@ router.get('/google/callback',
                         req.session.save((saveErr: any) => {
                             if (saveErr) {
                                 console.error("Session save error before redirecting incomplete existing user:", saveErr);
-                                return res.redirect('http://localhost:3000/?error=session_save_error');
+                                return res.redirect(`${FRONTEND_URL}/?error=session_save_error`);
                             }
                             console.log('Session saved for incomplete existing user. Redirecting...');
-                            return res.redirect(`http://localhost:3000/signup/complete-profile`); // Redirect without token
+                            return res.redirect(`${FRONTEND_URL}/signup/complete-profile?isNewUser=true`); // 파라미터 추가
                         });
                     }
                 } else if (req.session && req.session.pendingSocialProfile && req.session.pendingSocialProfile.provider === 'google') {
@@ -1031,12 +1034,12 @@ router.get('/google/callback',
                     // NOTE: Session *should* have been saved by the strategy before calling done(null, false)
                     // If not, the strategy needs adjustment, or save it here.
                     // Assuming strategy handles saving:
-                    return res.redirect('http://localhost:3000/signup/complete-profile');
+                    return res.redirect(`${FRONTEND_URL}/signup/complete-profile?isNewUser=true`); // 파라미터 추가
                 } else {
                     // --- Authentication Failed or Unexpected State ---
                     console.error('Google Callback: Unexpected state or user denied access. User:', user, 'Session:', req.session);
                     const failureMsg = info?.message || 'authentication_failed_unexpected';
-                    return res.redirect(`http://localhost:3000/?error=${encodeURIComponent(failureMsg)}`);
+                    return res.redirect(`${FRONTEND_URL}/?error=${encodeURIComponent(failureMsg)}`);
                 }
             })(req, res, next); // *** Important: Invoke the middleware returned by passport.authenticate ***
     }
@@ -1074,9 +1077,9 @@ router.get('/kakao',
  *       302:
  *         description: >
  *           Redirects to frontend:
- *           - `http://localhost:3000/auth/callback?token=<jwt>` on successful login (profile complete).
- *           - `http://localhost:3000/signup/complete-profile` for new users or incomplete profiles.
- *           - `http://localhost:3000/?error=<error_message>` on authentication failure.
+ *           - `${FRONTEND_URL}/auth/callback?token=<jwt>` on successful login (profile complete).
+ *           - `${FRONTEND_URL}/signup/complete-profile` for new users or incomplete profiles.
+ *           - `${FRONTEND_URL}/?error=<error_message>` on authentication failure.
  */
 router.get('/kakao/callback',
     (req: any, res, next) => { // Logging middleware (optional)
@@ -1085,7 +1088,7 @@ router.get('/kakao/callback',
         next();
     },
     (req: any, res, next) => { // Custom authentication callback handler
-        passport.authenticate('kakao', { failureRedirect: 'http://localhost:3000/?error=kakao_auth_failed' },
+        passport.authenticate('kakao', { failureRedirect: `${FRONTEND_URL}/?error=kakao_auth_failed` },
             async (err: any, user: any, info: any) => {
                 console.log('\n--- Inside /auth/kakao/callback passport.authenticate ---');
                 console.log('Error:', err);
@@ -1096,7 +1099,7 @@ router.get('/kakao/callback',
 
                 if (err) {
                     console.error('Authentication Error from Kakao strategy:', err);
-                    return res.redirect(`http://localhost:3000/?error=kakao_auth_error`);
+                    return res.redirect(`${FRONTEND_URL}/?error=kakao_auth_error`);
                 }
 
                 if (user) {
@@ -1110,23 +1113,23 @@ router.get('/kakao/callback',
                          const payload = { userId: user.id, email: user.email, status: user.status };
                          const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
                          console.log('Redirecting to /auth/callback with token.');
-                         return res.redirect(`http://localhost:3000/auth/callback?token=${token}`);
+                         return res.redirect(`${FRONTEND_URL}/auth/callback?token=${token}`);
                     } else {
                          // Profile incomplete: Session should have been set by strategy, redirect to complete
                          console.log('Kakao Callback: Existing user profile incomplete. Redirecting to complete profile.');
                          // Ensure session was saved by strategy before redirecting
-                         return res.redirect(`http://localhost:3000/signup/complete-profile`);
+                         return res.redirect(`${FRONTEND_URL}/signup/complete-profile?isNewUser=true`);
                     }
                 } else if (req.session && req.session.pendingSocialProfile && req.session.pendingSocialProfile.provider === 'kakao') {
                     // --- New User via Kakao (strategy called done(null, false)) --- 
                     console.log('Kakao Callback: New user identified by session. Redirecting to complete profile.');
                     // Session already has data, just redirect
-                    return res.redirect('http://localhost:3000/signup/complete-profile');
+                    return res.redirect(`${FRONTEND_URL}/signup/complete-profile?isNewUser=true`);
                 } else {
                     // --- Authentication Failed or Unexpected State ---
                     console.error('Kakao Callback: Unexpected state or user denied access. User:', user, 'Info:', info, 'Session:', req.session);
                     const failureMsg = info?.message || 'kakao_authentication_failed';
-                    return res.redirect(`http://localhost:3000/?error=${encodeURIComponent(failureMsg)}`);
+                    return res.redirect(`${FRONTEND_URL}/?error=${encodeURIComponent(failureMsg)}`);
                 }
             })(req, res, next); // Invoke the middleware
     }

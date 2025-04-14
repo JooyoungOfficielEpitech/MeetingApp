@@ -54,7 +54,7 @@ export default function AdminDashboardPage() {
       setIsLoadingMatches(true);
       setErrorStats(null);
       setErrorMatches(null);
-      const token = localStorage.getItem('authToken');
+      const token = localStorage.getItem('token');
 
       if (!token) {
         const errorMsg = 'Authentication token not found. Please log in.';

@@ -13,7 +13,7 @@ export let io: SocketIOServer; // Export io instance
 export function initSocket(server: HttpServer) {
     io = new SocketIOServer(server, {
         cors: {
-            origin: "http://localhost:3000", // 설정 파일로 이동 고려
+            origin: process.env.FRONTEND_URL || "http://localhost:3000", // 설정 파일로 이동 고려
             methods: ["GET", "POST"]
         }
     });

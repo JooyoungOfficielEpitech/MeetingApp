@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, ChangeEvent } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useForm } from 'react-hook-form';
 // Import icons for consistency 
 import { UserIcon, CakeIcon, ArrowsUpDownIcon, TagIcon, PhotoIcon, IdentificationIcon as BusinessCardIcon, XMarkIcon } from '@heroicons/react/24/outline'; 
 import { Montserrat, Inter } from 'next/font/google';
@@ -17,32 +18,51 @@ const inter = Inter({ subsets: ['latin'] });
 
 // Define interfaces for API response data types
 interface UserData {
-    id: number | string;
-    gender: string;
-    status?: string; // Add optional status field
+    id?: number | string;
+    nickname?: string;
+    gender?: string;
+    status?: string;
     // Add other user fields if present in the response
 }
 
-interface ProfileDataResponse {
-    email?: string;
-    name?: string;
-    gender?: string;
-    // Add other fields if your session endpoint returns more
+interface ProfileResponse {
+    user: {
+        id: number | string;
+        nickname?: string;
+        gender?: string;
+        status?: string;
+    };
 }
 
 interface CompleteSocialResponse {
     token: string;
-    user: UserData;
+    user: {
+        id: number | string;
+        gender?: string;
+        status?: string;
+        [key: string]: any;
+    };
     message?: string; // Optional error/success message
+}
+
+interface ProfileFormData {
+  nickname: string;
+  gender: string;
+  age?: string;
+  height?: string;
+  mbti?: string;
+  [key: string]: string | undefined;
 }
 
 export default function CompleteProfilePage() {
     const router = useRouter();
-    const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-    // ★ State for rejection reason ★
-    const [rejectionReason, setRejectionReason] = useState<string | null>(null);
+    const searchParams = useSearchParams();
+    const isNewUser = searchParams.get('newUser') === 'true' || searchParams.get('isNewUser') === 'true';
+    const [loading, setLoading] = useState(false);
+    const [loginChecked, setLoginChecked] = useState(false);
     
+    const { register, handleSubmit, setValue, formState: { errors } } = useForm<ProfileFormData>();
+
     // State for pre-filled data from session
     const [email, setEmail] = useState('');
     const [name, setName] = useState('');
@@ -59,107 +79,81 @@ export default function CompleteProfilePage() {
     const [profilePicturePreviews, setProfilePicturePreviews] = useState<string[]>([]);
     const [businessCardPreview, setBusinessCardPreview] = useState<string | null>(null);
 
+    // State for user data
+    const [userData, setUserData] = useState<UserData>({} as UserData);
+
+    // 로그인 상태 확인
     useEffect(() => {
-        const token = localStorage.getItem('authToken');
-        console.log(`[Complete Profile] Page loaded. Token present: ${!!token}`);
+        console.log('[CompleteProfile] 페이지 로드 - 로그인 상태 확인 중');
+        console.log('[CompleteProfile] URL 파라미터:', { isNewUser, searchParams });
 
-        // Fetch temporary profile data from session (for Social Login)
-        const fetchSessionData = async () => {
-            console.log('[Complete Profile] Attempting to fetch session data (for social login)...');
-            setIsLoading(true);
-            setError(null);
-            try {
-                const response = await axios.get<ProfileDataResponse>(
-                    'http://localhost:3001/api/auth/session/profile-data',
-                    { withCredentials: true }
-                );
-                const data = response.data;
-                console.log('[Complete Profile] Fetched session profile data:', data);
-                if (!data || !data.email) {
-                    console.error('[Complete Profile] Invalid or missing session data.');
-                    setError('세션 정보가 유효하지 않습니다. 소셜 로그인을 다시 시도해주세요.');
-                    // Optionally redirect or show specific error for social flow
-                    router.replace('/'); // Go back to login for safety
-                    return;
-                }
-                setEmail(data.email || '');
-                setName(data.name || '');
-                setGender(data.gender || '');
-            } catch (err: any) {
-                 console.error("Failed to fetch session profile data:", err);
-                 let errorMessage = '임시 프로필 정보를 불러오는 중 오류가 발생했습니다.';
-                 if (err.response?.status === 401) {
-                     errorMessage = '세션이 만료되었거나 유효하지 않습니다. 소셜 로그인을 다시 시도해주세요.';
-                     router.replace('/'); 
-                     return;
-                 } else if (err.response) {
-                     errorMessage = err.response.data?.message || `세션 데이터 로딩 실패 (Status: ${err.response.status})`;
-                 } else { errorMessage = err.message || errorMessage; }
-                 setError(errorMessage);
-            } finally {
-                setIsLoading(false);
-            }
-        };
+        // URL에서 직접 isNewUser 확인
+        const urlParams = new URLSearchParams(window.location.search);
+        const isNewUserParam = urlParams.get('isNewUser') === 'true';
+        
+        console.log('[CompleteProfile] URL 직접 확인 결과:', {
+          isNewUserParam,
+          rawParam: urlParams.get('isNewUser'),
+          fullUrlParams: Object.fromEntries(urlParams.entries())
+        });
 
-        // Fetch user data using token (for Regular Signup)
-        const fetchUserDataWithToken = async () => {
-            console.log('[Complete Profile] Attempting to fetch user data with token (for regular signup)...');
-            setIsLoading(true);
-            setError(null);
-            try {
-                // Use axiosInstance which should include the token
-                const response = await axiosInstance.get<ProfileDataResponse>('/api/profile/me'); 
-                const data = response.data;
-                console.log('[Complete Profile] Fetched user data via token:', data);
-                
-                // Assuming /api/profile/me returns at least email and name for the token's user
-                if (!data || !data.email) { 
-                    console.error('[Complete Profile] Invalid data received from /api/profile/me.');
-                    setError('사용자 정보를 가져오는데 실패했습니다. 다시 로그인해주세요.');
-                    localStorage.removeItem('authToken'); // Clear potentially invalid token
-                    router.replace('/'); 
-                    return;
-                }
-                setEmail(data.email || '');
-                setName(data.name || '');
-                setGender(data.gender || ''); // Pre-fill gender if available
+        // 로컬 스토리지에서 토큰 확인
+        const token = localStorage.getItem('token');
+        const hasToken = !!token;
+        console.log('[CompleteProfile] 로컬 스토리지 토큰 존재:', hasToken);
 
-            } catch (err: any) {
-                 console.error("Failed to fetch user data with token:", err);
-                 let errorMessage = '사용자 정보를 불러오는 중 오류가 발생했습니다.';
-                 if (err.response?.status === 401 || err.response?.status === 403) {
-                     errorMessage = '인증 정보가 유효하지 않습니다. 다시 로그인해주세요.';
-                     localStorage.removeItem('authToken');
-                     router.replace('/'); 
-                     return;
-                 } else if (err.response) {
-                      errorMessage = err.response.data?.message || `사용자 정보 로딩 실패 (Status: ${err.response.status})`;
-                 } else { errorMessage = err.message || errorMessage; }
-                 setError(errorMessage);
-            } finally {
-                setIsLoading(false);
-            }
-        };
-
-        // --- Conditional Fetching --- 
-        if (token) {
-            // If token exists, assume regular signup flow
-            fetchUserDataWithToken();
+        // 리디렉션 파라미터가 있거나 토큰이 있으면 진행
+        if (isNewUserParam || isNewUser) {
+          console.log('[CompleteProfile] 신규 사용자 감지. 프로필 작성 폼 로드');
+          // 신규 사용자 흐름 - 토큰 확인 없이 진행
+          setLoginChecked(true);
+          return;
+        } else if (hasToken) {
+          console.log('[CompleteProfile] 기존 사용자 감지. 프로필 정보 로드 중');
+          // 기존 사용자 - 프로필 정보 가져오기
+          fetchUserProfile(token);
         } else {
-            // If no token, assume social login flow
-            fetchSessionData();
+          // 토큰 없고 신규 사용자 표시도 없는 경우
+          console.log('[CompleteProfile] 토큰 없음. 로그인 페이지로 이동');
+          router.push('/');
         }
-        // ---------------------------
+    }, [isNewUser, router, searchParams]);
 
-        // ★ Read rejection reason from sessionStorage ★
-        const reason = sessionStorage.getItem('profileRejectionReason');
-        if (reason) {
-            console.log('[Complete Profile] Found rejection reason in sessionStorage:', reason);
-            setRejectionReason(reason);
-            sessionStorage.removeItem('profileRejectionReason'); // Clear after reading
+    const fetchUserProfile = async (token: string) => {
+        try {
+            setLoading(true);
+            console.log('[CompleteProfile] 프로필 정보 요청 중');
+            
+            const response = await axiosInstance.get<ProfileResponse>('/api/profile/me', {
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
+            });
+            
+            console.log('[CompleteProfile] 프로필 정보 응답:', response.data);
+            
+            if (response.data && response.data.user) {
+                setUserData({
+                    id: response.data.user.id,
+                    nickname: response.data.user.nickname || '',
+                    gender: response.data.user.gender || '',
+                    status: response.data.user.status
+                });
+                setLoginChecked(true);
+            } else {
+                // 사용자 정보가 없으면 빈 객체로 초기화
+                console.log('[CompleteProfile] 응답에 사용자 정보 없음. 빈 객체로 초기화');
+                setUserData({} as UserData);
+                setLoginChecked(true);
+            }
+        } catch (error: any) {
+            console.error('[CompleteProfile] 사용자 정보 조회 실패:', error);
+            localStorage.removeItem('token');
+            router.push('/');
+        } finally {
+            setLoading(false);
         }
-
-    }, [router]);
+    };
 
     // Handler for profile picture selection
     const handleProfilePictureChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -252,110 +246,138 @@ export default function CompleteProfilePage() {
         };
     }, [profilePicturePreviews, businessCardPreview]);
 
-    const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-        e.preventDefault();
-        setIsLoading(true);
-        setError(null);
+    // 나이 입력 핸들러
+    const handleAgeChange = (e: ChangeEvent<HTMLInputElement>) => {
+        const value = e.target.value;
+        setAge(value);
+        setValue('age', value); // React Hook Form 상태도 업데이트
+    };
+    
+    // 키 입력 핸들러
+    const handleHeightChange = (e: ChangeEvent<HTMLInputElement>) => {
+        const value = e.target.value;
+        setHeight(value);
+        setValue('height', value); // React Hook Form 상태도 업데이트
+    };
+    
+    // MBTI 입력 핸들러
+    const handleMbtiChange = (e: ChangeEvent<HTMLInputElement>) => {
+        const value = e.target.value.toUpperCase();
+        setMbti(value);
+        setValue('mbti', value); // React Hook Form 상태도 업데이트
+    };
 
-        // --- Validation ---
-        if (!age || !height || !gender || !mbti) {
-            setError('모든 필수 정보를 입력해주세요.');
-            setIsLoading(false);
-            return;
-        }
+    const onSubmit = async (data: ProfileFormData) => {
+        setLoading(true);
+        console.log('[CompleteProfile] 프로필 제출 데이터:', data);
+        
+        // 파일 업로드 유효성 검사
         if (profilePictures.length === 0) {
-            setError('프로필 사진을 최소 1장 이상 등록해주세요.');
-            setIsLoading(false);
+            alert('최소 한 장의 프로필 사진이 필요합니다.');
+            setLoading(false);
             return;
         }
-         if (profilePictures.length > 3) {
-            setError('프로필 사진은 최대 3장까지 가능합니다.');
-            setIsLoading(false);
+        
+        if (!businessCard) {
+            alert('명함 또는 직업 증명 사진이 필요합니다.');
+            setLoading(false);
             return;
         }
-         if (!businessCard) {
-            setError('명함 사진을 등록해주세요.');
-            setIsLoading(false);
-            return;
-        }
-        // --- End Validation ---
-
-        const formData = new FormData();
-        formData.append('age', age);
-        formData.append('height', height);
-        formData.append('gender', gender);
-        formData.append('mbti', mbti);
-        profilePictures.forEach((file) => { formData.append('profilePictures', file, file.name); });
-        if (businessCard) { formData.append('businessCard', businessCard, businessCard.name); }
-
-        console.log('Submitting profile completion with FormData...');
-        const token = localStorage.getItem('authToken');
-
+        
         try {
-            let response: any;
-            let data: CompleteSocialResponse; // Assume similar response structure for now
-
-            if (token) {
-                // --- Regular Signup Flow (Use Token Auth) ---
-                console.log('[Handle Submit] Token found. Calling /api/profile/complete-regular');
-                response = await axiosInstance.post<CompleteSocialResponse>(
-                    '/api/profile/complete-regular', // Use relative path if axiosInstance has baseURL set
-                    formData
-                    // axiosInstance should automatically include the token
-                );
-                data = response.data;
-                console.log('Response from /complete-regular:', data);
-                // ---------------------------------------------
-            } else {
-                // --- Social Login Flow (Use Session Auth) ---
-                console.log('[Handle Submit] No token found. Calling /api/auth/complete-social');
-                response = await axios.post<CompleteSocialResponse>(
-                    'http://localhost:3001/api/auth/complete-social', 
-                    formData, 
-                    { withCredentials: true } 
-                );
-                data = response.data;
-                console.log('Response from /complete-social:', data);
-                // -----------------------------------------
-            }
-
-            // --- Process Response (Common for both flows) --- 
-            if ((response.status === 200 || response.status === 201) && data.token && data.user) {
-                localStorage.setItem('authToken', data.token); // Update token (it might contain new status)
-                localStorage.setItem('userId', data.user.id.toString());
-                localStorage.setItem('userGender', data.user.gender);
-                localStorage.setItem('userStatus', data.user.status || 'pending_approval');
-                console.log('Profile submitted successfully. Status:', data.user.status);
+            // 소셜 로그인 신규 사용자인 경우 (토큰이 없는 경우)
+            if (isNewUser && !localStorage.getItem('token')) {
+                console.log('[CompleteProfile] 소셜 로그인 신규 사용자 - 세션 기반 요청');
                 
-                alert(data.message || '프로필 정보가 제출되었습니다. 관리자 승인을 기다려주세요.'); 
-                router.replace('/auth/pending-approval'); // Redirect to pending approval page
+                // FormData 객체 생성
+                const formData = new FormData();
+                
+                // 기본 정보 추가
+                formData.append('nickname', data.nickname);
+                formData.append('gender', data.gender);
+                formData.append('age', data.age || '');
+                formData.append('height', data.height || '');
+                formData.append('mbti', (data.mbti || '').toUpperCase());
+                
+                // 프로필 사진 추가 (최대 3장)
+                profilePictures.forEach((file, index) => {
+                    formData.append('profilePictures', file);
+                });
+                
+                // 명함 추가
+                formData.append('businessCard', businessCard);
+                
+                // 디버깅을 위해 FormData 내용 출력 (FormData는 직접 출력할 수 없음)
+                console.log('[CompleteProfile] 전송할 데이터:');
+                console.log('- 닉네임:', data.nickname);
+                console.log('- 성별:', data.gender);
+                console.log('- 나이:', data.age);
+                console.log('- 키:', data.height);
+                console.log('- MBTI:', data.mbti?.toUpperCase());
+                console.log('- 프로필 사진 수:', profilePictures.length);
+                console.log('- 명함 파일:', businessCard?.name);
+                
+                // 백엔드에서 세션을 통해 사용자를 식별할 수 있도록 자격 증명 포함
+                const response = await axiosInstance.post<CompleteSocialResponse>('/api/auth/complete-social', formData, {
+                    withCredentials: true, // 중요: 세션 쿠키 전송을 위해 필요
+                    headers: {
+                        'Content-Type': 'multipart/form-data' // 파일 업로드를 위한 헤더
+                    }
+                });
+                
+                console.log('[CompleteProfile] 소셜 프로필 완성 응답:', response.data);
+                
+                // 응답에서 토큰 저장
+                if (response.data.token) {
+                    localStorage.setItem('token', response.data.token);
+                    
+                    if (response.data.user) {
+                        if (response.data.user.id) {
+                            localStorage.setItem('userId', response.data.user.id.toString());
+                        }
+                        if (response.data.user.gender) {
+                            localStorage.setItem('userGender', response.data.user.gender);
+                        }
+                        if (response.data.user.status) {
+                            localStorage.setItem('user', response.data.user.status);
+                        }
+                    }
+                }
+                
+                alert('프로필 설정이 완료되었습니다!');
+                
+                // 상태에 따라 리디렉션
+                console.log('[CompleteProfile] 유저 상태:', response.data.user?.status);
+                if (response.data.user && response.data.user.status === 'pending_approval') {
+                    console.log('[CompleteProfile] 승인 대기 상태로 이동');
+                    router.replace('/auth/pending-approval');
+                } else {
+                    console.log('[CompleteProfile] 메인 페이지로 이동');
+                    router.replace('/main');
+                }
             } else {
-                 setError(data.message || `회원가입 처리 중 예상치 못한 응답: ${response.status}`);
+                // 기존 사용자 업데이트 흐름
+                const response = await axiosInstance.put('/api/profile/me', data);
+                console.log('[CompleteProfile] 프로필 업데이트 응답:', response.data);
+                
+                // 상태 업데이트
+                localStorage.setItem('userGender', data.gender);
+                
+                alert('프로필 설정이 완료되었습니다!');
+                router.replace('/main');
             }
-            // -----------------------------------------------
-        } catch (err: any) {
-            console.error('Failed to complete profile:', err);
-            let errorMessage = '예상치 못한 오류가 발생했습니다. 다시 시도해주세요.';
-            if (err.response) {
-                // Error from server response (e.g., 4xx, 5xx)
-                // Access err.response.data safely (might contain specific error structure)
-                errorMessage = err.response.data?.message || `서버 오류: ${err.response.status}`;
-                 if (err.response.status === 401) {
-                     errorMessage = '인증 오류가 발생했습니다. 다시 로그인해주세요.';
-                     // Consider if redirect is needed here or handled by interceptor
-                 } else if (err.response.status === 400) {
-                     errorMessage = `입력 정보 오류: ${err.response.data?.message || '내용을 확인해주세요.'}`;
-                 }
-            } else if (err.request) {
-                // Request made but no response
-                errorMessage = '서버에 연결할 수 없습니다. 네트워크를 확인해주세요.';
+        } catch (error: any) {
+            console.error('[CompleteProfile] 프로필 업데이트 오류:', error);
+            
+            // 유효성 검사 오류 처리
+            if (error.response?.data?.errors && Array.isArray(error.response.data.errors)) {
+                const errorMessages = error.response.data.errors.join('\n');
+                alert(`프로필 설정 중 오류가 발생했습니다:\n${errorMessages}`);
             } else {
-                // Error setting up request
-                errorMessage = err.message || errorMessage;
+                alert(`프로필 설정 중 오류가 발생했습니다: ${error.response?.data?.message || error.message || '알 수 없는 오류'}`);
             }
-            setError(errorMessage);
         } finally {
-            setIsLoading(false);
+            setLoading(false);
         }
     };
 
@@ -371,244 +393,229 @@ export default function CompleteProfilePage() {
     const fileInputLabelStyle = "relative cursor-pointer bg-slate-800 rounded-md font-medium text-amber-400 hover:text-amber-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-offset-gray-950 focus-within:ring-amber-500 px-1";
     // -----------------------------
 
-    // Show loading state before data is fetched
-    if (isLoading && !email) { 
+    if (!loginChecked) {
         return (
-             <div className={`min-h-screen bg-black text-slate-100 flex items-center justify-center ${inter.className}`}> 
-                <p>Loading profile data...</p>
-             </div>
+            <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">
+                <div className="text-center">
+                    <p className="text-xl font-semibold">로그인 상태 확인 중...</p>
+                    <p className="text-gray-400 mt-2">잠시만 기다려주세요.</p>
+                </div>
+            </div>
         );
     }
 
     return (
-        <div className={`min-h-screen bg-black text-slate-100 flex items-center justify-center py-16 px-4 sm:px-6 lg:px-8 ${inter.className}`}> 
-            <div className="max-w-sm w-full space-y-8 bg-gray-950 p-10 rounded-2xl shadow-xl"> 
-                {/* Consistent Header */}
+        <div className={`min-h-screen bg-black text-slate-100 flex items-center justify-center py-16 px-4 sm:px-6 lg:px-8 ${inter.className}`}>
+            <div className="max-w-sm w-full space-y-8 bg-gray-950 p-10 rounded-2xl shadow-xl">
                 <div className="text-center">
-                    {/* You might want a different title/icon here */}
-                     <span className={`text-5xl font-bold text-amber-400 ${montserrat.className}`}>Logo</span> 
-                     <h2 className="mt-4 text-center text-2xl font-bold tracking-tight text-slate-200">프로필 완성하기</h2>
-                     <p className="mt-2 text-center text-sm text-slate-400">
-                       환영합니다, {name || '사용자'}님! ({email})
-                     </p>
-                     <p className="mt-1 text-center text-xs text-slate-500">
-                        프로필을 완성하고 서비스를 시작하세요.
-                     </p>
+                    <span className={`text-5xl font-bold text-amber-400 ${montserrat.className}`}>Logo</span> 
+                    <h2 className="mt-4 text-center text-2xl font-bold tracking-tight text-slate-200">프로필 완성하기</h2>
+                    <p className="mt-2 text-center text-sm text-slate-400">
+                        추가 정보를 입력하여 프로필을 완성해주세요.
+                    </p>
                 </div>
-
-                {/* ★ Display Rejection Reason if exists ★ */}
-                {rejectionReason && (
-                    <div className="mb-6 p-4 bg-yellow-900/50 border border-yellow-700 text-yellow-200 rounded-md">
-                        <p className="font-semibold">관리자 거절 사유:</p>
-                        <p>{rejectionReason}</p>
-                    </div>
-                )}
-
-                <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-                    {/* Age Input */}
+                
+                <form onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-6">
+                    {/* 닉네임 */}
                     <div>
-                        <label htmlFor="age" className={labelStyle}>나이</label>
+                        <label htmlFor="nickname" className={labelStyle}>닉네임</label>
                         <div className="relative mt-1">
-                             <div className={iconWrapperStyle}>
-                                 <CakeIcon className="h-5 w-5 text-slate-500" aria-hidden="true" />
-                             </div>
-                             <input
-                                id="age"
-                                name="age"
-                                type="number"
-                                required
-                                min="19" // Example minimum age
+                            <div className={iconWrapperStyle}><UserIcon className="h-5 w-5 text-slate-500"/></div>
+                            <input
+                                id="nickname"
+                                type="text"
+                                placeholder="닉네임"
                                 className={inputBaseStyle}
-                                placeholder="나이 (만)"
-                                value={age}
-                                onChange={(e) => setAge(e.target.value)}
+                                {...register('nickname', { required: '닉네임은 필수입니다' })}
                             />
                         </div>
+                        {errors.nickname && (
+                            <p className="text-red-500 text-sm mt-1">{errors.nickname.message}</p>
+                        )}
                     </div>
                     
-                    {/* Height Input */}
-                    <div>
-                         <label htmlFor="height" className={labelStyle}>키 (cm)</label>
-                         <div className="relative mt-1">
-                             <div className={iconWrapperStyle}>
-                                 <ArrowsUpDownIcon className="h-5 w-5 text-slate-500" aria-hidden="true" />
-                             </div>
-                             <input
-                                id="height"
-                                name="height"
-                                type="number"
-                                required
-                                min="100" // Example minimum height
-                                className={inputBaseStyle}
-                                placeholder="키 (cm)"
-                                value={height}
-                                onChange={(e) => setHeight(e.target.value)}
-                            />
-                        </div>
-                    </div>
-                    
-                    {/* Gender Input */}
+                    {/* 성별 */}
                     <div>
                         <label htmlFor="gender" className={labelStyle}>성별</label>
                         <div className="relative mt-1">
-                             <div className={iconWrapperStyle}>
-                                  <UserIcon className="h-5 w-5 text-slate-500" aria-hidden="true" />
-                             </div>
-                             <select
+                            <div className={iconWrapperStyle}><UserIcon className="h-5 w-5 text-slate-500"/></div>
+                            <select
                                 id="gender"
-                                name="gender"
-                                required
-                                className={`${selectBaseStyle} appearance-none`}
-                                value={gender}
-                                onChange={(e) => setGender(e.target.value)}
+                                className={selectBaseStyle}
+                                {...register('gender', { required: '성별을 선택해주세요' })}
                             >
-                                <option value="" disabled={!!gender}>성별 선택</option>
+                                <option value="">성별 선택</option>
                                 <option value="male">남성</option>
                                 <option value="female">여성</option>
+                                <option value="other">기타</option>
                             </select>
-                             {/* Optional: Add a dropdown arrow icon absolutely positioned */}
-                             <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                                 <svg className="h-5 w-5 text-slate-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                     <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.23 8.29a.75.75 0 01.02-1.06z" clipRule="evenodd" />
-                                 </svg>
-                             </div>
                         </div>
+                        {errors.gender && (
+                            <p className="text-red-500 text-sm mt-1">{errors.gender.message}</p>
+                        )}
                     </div>
-
-                    {/* MBTI Input */}
+                    
+                    {/* 나이 */}
                     <div>
-                         <label htmlFor="mbti" className={labelStyle}>MBTI</label>
-                         <div className="relative mt-1">
-                             <div className={iconWrapperStyle}>
-                                 <TagIcon className="h-5 w-5 text-slate-500" aria-hidden="true" />
-                             </div>
-                             <input
-                                id="mbti"
-                                name="mbti"
-                                type="text"
+                        <label htmlFor="age" className={labelStyle}>나이</label>
+                        <div className="relative mt-1">
+                            <div className={iconWrapperStyle}><CakeIcon className="h-5 w-5 text-slate-500"/></div>
+                            <input
+                                id="age"
+                                type="number"
+                                placeholder="나이"
+                                className={inputBaseStyle}
+                                min="19"
                                 required
-                                maxLength={4}
-                                pattern="[EI][SN][TF][JP]" // Basic MBTI pattern validation
-                                title="MBTI 유형 (예: INFP) 4글자를 입력하세요."
-                                className={`${inputBaseStyle} uppercase`}
-                                placeholder="MBTI (예: INFP)"
-                                value={mbti}
-                                onChange={(e) => setMbti(e.target.value.toUpperCase().replace(/[^A-Z]/g, ''))} // Allow only letters and force uppercase
+                                value={age}
+                                {...register('age', { 
+                                    required: '나이를 입력해주세요', 
+                                    min: { value: 19, message: '19세 이상이어야 합니다' } 
+                                })}
+                                onChange={handleAgeChange}
                             />
                         </div>
+                        {errors.age && (
+                            <p className="text-red-500 text-sm mt-1">{errors.age.message}</p>
+                        )}
                     </div>
-
-                    {/* --- Profile Picture Input --- */}
-                     <div>
-                         <label htmlFor="profilePictures" className={formLabelStyle}>
-                              프로필 사진 (최소 1장, 최대 3장) <span className="text-red-500">*</span>
-                              <span className="text-xs text-slate-400 block">첫 번째 사진이 메인 프로필이 됩니다.</span>
-                         </label>
-                         {/* Make the dashed area clickable by wrapping in label */}
-                         <label htmlFor="profilePictures" className={fileInputAreaStyle}>
-                             <div className="space-y-1 text-center">
-                                 <PhotoIcon className="mx-auto h-12 w-12 text-slate-500" />
-                                 <div className="flex text-sm text-slate-400 justify-center">
-                                     <span className={fileInputLabelStyle}>
-                                         <span>파일 선택</span>
-                                         {/* Hidden actual input */}
-                                         <input id="profilePictures" name="profilePictures" type="file" className="sr-only" multiple accept="image/jpeg, image/png, image/gif" onChange={handleProfilePictureChange} required={profilePictures.length === 0} />
-                                     </span>
-                                     <p className="pl-1 hidden sm:inline">또는 드래그 앤 드롭</p> {/* Hide on very small screens */}
-                                 </div>
-                                 <p className="text-xs text-slate-500">JPG, PNG, GIF (각 10MB 이하)</p>
-                             </div>
-                         </label>
-                         {/* Profile Picture Previews with Delete Button */}
-                         {profilePicturePreviews.length > 0 && (
-                             <div className="mt-3 grid grid-cols-3 gap-2">
-                                 {profilePicturePreviews.map((url, index) => (
-                                     <div key={index} className="relative aspect-square group border border-slate-700 rounded-md overflow-hidden">
-                                         <img src={url} alt={`프로필 사진 미리보기 ${index + 1}`} className="object-cover w-full h-full" />
-                                          {index === 0 && (
-                                             <span className="absolute top-0 left-0 bg-amber-500 text-black text-xs font-bold px-1.5 py-0.5 rounded-br-md rounded-tl-md">메인</span>
-                                          )}
-                                          {/* Delete Button */}
-                                          <button
+                    
+                    {/* 신장 */}
+                    <div>
+                        <label htmlFor="height" className={labelStyle}>신장 (cm)</label>
+                        <div className="relative mt-1">
+                            <div className={iconWrapperStyle}><ArrowsUpDownIcon className="h-5 w-5 text-slate-500"/></div>
+                            <input
+                                id="height"
+                                type="number"
+                                placeholder="신장 (cm)"
+                                className={inputBaseStyle}
+                                min="100"
+                                required
+                                value={height}
+                                {...register('height', { 
+                                    required: '신장을 입력해주세요', 
+                                    min: { value: 100, message: '100cm 이상이어야 합니다' } 
+                                })}
+                                onChange={handleHeightChange}
+                            />
+                        </div>
+                        {errors.height && (
+                            <p className="text-red-500 text-sm mt-1">{errors.height.message}</p>
+                        )}
+                    </div>
+                    
+                    {/* MBTI */}
+                    <div>
+                        <label htmlFor="mbti" className={labelStyle}>MBTI</label>
+                        <div className="relative mt-1">
+                            <div className={iconWrapperStyle}><TagIcon className="h-5 w-5 text-slate-500"/></div>
+                            <input
+                                id="mbti"
+                                type="text"
+                                placeholder="MBTI (예: INFP)"
+                                className={`${inputBaseStyle} uppercase`}
+                                maxLength={4}
+                                required
+                                value={mbti}
+                                {...register('mbti', { 
+                                    required: 'MBTI를 입력해주세요',
+                                    pattern: { 
+                                        value: /^[EI][SN][TF][JP]$/i, 
+                                        message: '올바른 MBTI 형식이 아닙니다 (예: INFP)' 
+                                    } 
+                                })}
+                                onChange={handleMbtiChange}
+                            />
+                        </div>
+                        {errors.mbti && (
+                            <p className="text-red-500 text-sm mt-1">{errors.mbti.message}</p>
+                        )}
+                    </div>
+                    
+                    {/* 프로필 사진 업로드 */}
+                    <div>
+                        <label htmlFor="profile-pictures" className={formLabelStyle}>프로필 사진 (최대 3장)</label>
+                        <div className={fileInputAreaStyle}>
+                            <input
+                                id="profile-pictures"
+                                type="file"
+                                accept="image/*"
+                                multiple
+                                className="sr-only"
+                                onChange={handleProfilePictureChange}
+                            />
+                            <label htmlFor="profile-pictures" className="w-full text-center cursor-pointer">
+                                <PhotoIcon className="mx-auto h-12 w-12 text-slate-500" />
+                                <span className="mt-2 block text-sm font-medium text-slate-300">
+                                    사진 선택하기
+                                </span>
+                                <span className="mt-1 block text-xs text-slate-500">
+                                    PNG, JPG, GIF 최대 10MB (필수)
+                                </span>
+                            </label>
+                        </div>
+                        
+                        {/* 프로필 사진 미리보기 */}
+                        {profilePicturePreviews.length > 0 && (
+                            <div className="mt-4 grid grid-cols-3 gap-2">
+                                {profilePicturePreviews.map((url, index) => (
+                                    <div key={index} className="relative">
+                                        <img src={url} alt={`Preview ${index}`} className="w-full h-24 object-cover rounded-md" />
+                                        <button
                                             type="button"
                                             onClick={() => handleRemoveProfilePicture(index)}
-                                            className="absolute top-0.5 right-0.5 p-0.5 bg-black bg-opacity-60 rounded-full text-white hover:bg-opacity-80 focus:outline-none focus:ring-2 focus:ring-red-500 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-                                            aria-label={`프로필 사진 ${index + 1} 삭제`}
-                                          >
-                                             <XMarkIcon className="h-4 w-4" />
-                                          </button>
-                                     </div>
-                                 ))}
-                             </div>
-                         )}
-                         {/* Display selected file count */}
-                          {profilePictures.length > 0 && (
-                            <p className="text-xs text-slate-400 mt-1 text-right">{profilePictures.length} / 3 장 선택됨</p>
-                          )}
-                     </div>
-                     {/* --- End Profile Picture Input --- */}
-
-
-                    {/* --- Business Card Input --- */}
-                     <div>
-                         <label htmlFor="businessCard" className={formLabelStyle}>
-                             명함/직업 증명 사진 <span className="text-red-500">*</span>
-                              <span className="text-xs text-slate-400 block">직업을 증명할 수 있는 명함, 사원증 등을 업로드해주세요.</span>
-                         </label>
-                         {/* Make the dashed area clickable */}
-                         <label htmlFor="businessCard" className={fileInputAreaStyle}>
-                             <div className="space-y-1 text-center">
-                                 <BusinessCardIcon className="mx-auto h-12 w-12 text-slate-500" />
-                                 <div className="flex text-sm text-slate-400 justify-center">
-                                     <span className={fileInputLabelStyle}>
-                                         <span>파일 선택</span>
-                                         <input id="businessCard" name="businessCard" type="file" className="sr-only" accept="image/jpeg, image/png" onChange={handleBusinessCardChange} required={!businessCard} />
-                                     </span>
-                                     <p className="pl-1 hidden sm:inline">또는 드래그 앤 드롭</p>
-                                 </div>
-                                 <p className="text-xs text-slate-500">JPG, PNG (5MB 이하)</p>
-                             </div>
-                         </label>
-                          {/* Business Card Preview with Delete Button */}
-                          {businessCardPreview && (
-                             <div className="mt-3 relative w-full max-w-[200px] mx-auto group border border-slate-700 rounded-md overflow-hidden">
-                                 <img src={businessCardPreview} alt="명함 미리보기" className="object-contain w-full h-auto" />
-                                 {/* Delete Button */}
-                                 <button
+                                            className="absolute inset-0 w-full h-full bg-black bg-opacity-50 rounded-md flex items-center justify-center text-white"
+                                        >
+                                            <XMarkIcon className="h-4 w-4" />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                    
+                    {/* 명함 업로드 */}
+                    <div>
+                        <label htmlFor="businessCard" className={formLabelStyle}>명함 또는 직업 증명 사진</label>
+                        <div className={fileInputAreaStyle}>
+                            <input
+                                id="businessCard"
+                                type="file"
+                                accept="image/*"
+                                className="sr-only"
+                                onChange={handleBusinessCardChange}
+                            />
+                            <label htmlFor="businessCard" className="w-full text-center cursor-pointer">
+                                <BusinessCardIcon className="mx-auto h-12 w-12 text-slate-500" />
+                                <span className="mt-2 block text-sm font-medium text-slate-300">
+                                    사진 선택하기
+                                </span>
+                                <span className="mt-1 block text-xs text-slate-500">
+                                    PNG, JPG, GIF 최대 10MB (필수)
+                                </span>
+                            </label>
+                        </div>
+                        
+                        {/* 명함 미리보기 */}
+                        {businessCardPreview && (
+                            <div className="mt-4">
+                                <img src={businessCardPreview} alt="Business Card Preview" className="w-full h-24 object-cover rounded-md" />
+                                <button
                                     type="button"
                                     onClick={handleRemoveBusinessCard}
-                                    className="absolute top-0.5 right-0.5 p-0.5 bg-black bg-opacity-60 rounded-full text-white hover:bg-opacity-80 focus:outline-none focus:ring-2 focus:ring-red-500 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-                                    aria-label="명함 사진 삭제"
-                                 >
-                                     <XMarkIcon className="h-4 w-4" />
-                                 </button>
-                             </div>
-                         )}
-                         {/* Display selected file name */}
-                         {businessCard && (
-                            <p className="text-xs text-slate-400 mt-1 text-right truncate">{businessCard.name}</p>
-                         )}
-                     </div>
-                     {/* --- End Business Card Input --- */}
-
-
-                    {/* Error Display */}
-                    {error && (
-                        <div className="text-red-400 text-sm text-center p-3 bg-red-900 bg-opacity-50 rounded-lg border border-red-700">
-                            {error}
-                        </div>
-                    )}
-
-                    {/* Submit Button */}
-                    <div>
-                        <button
-                            type="submit"
-                            disabled={isLoading}
-                             className={`${buttonBaseStyle} bg-amber-500 hover:bg-amber-600 text-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-800 focus:ring-amber-500 ${montserrat.className} font-semibold ${isLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
-                        >
-                            {isLoading ? '저장 중...' : '프로필 완성 및 가입 완료'}
-                        </button>
+                                    className="mt-2 w-full py-2 bg-red-500 text-white rounded-md"
+                                >
+                                    <XMarkIcon className="h-4 w-4 mr-2" />
+                                    사진 제거하기
+                                </button>
+                            </div>
+                        )}
                     </div>
+                    
+                    <button type="submit" className={buttonBaseStyle}>
+                        프로필 완성하기
+                    </button>
                 </form>
             </div>
         </div>

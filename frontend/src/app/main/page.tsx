@@ -42,7 +42,7 @@ export default function MainPage() {
 
   // --- WebSocket Connection Effect --- 
   useEffect(() => {
-    const token = localStorage.getItem('authToken');
+    const token = localStorage.getItem('token');
     if (!token) {
       console.log("MainPage: No token found, cannot connect WebSocket.");
       // Redirect or handle missing token appropriately
@@ -80,7 +80,7 @@ export default function MainPage() {
       // Handle specific errors like auth failure
       if (err.message.includes('Authentication error')) {
            // Maybe force logout?
-           localStorage.removeItem('authToken');
+           localStorage.removeItem('token');
            router.push('/');
       }
     });
@@ -177,7 +177,7 @@ export default function MainPage() {
           console.error('MainPage: Failed to fetch initial data:', err);
           setError(err.response?.data?.message || 'Failed to load user data.');
           if (err.response?.status === 401 || err.response?.status === 403) {
-              localStorage.removeItem('authToken');
+              localStorage.removeItem('token');
               router.push('/');
           }
       } finally {

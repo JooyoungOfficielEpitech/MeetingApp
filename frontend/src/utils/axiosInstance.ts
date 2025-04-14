@@ -32,7 +32,7 @@ axiosInstance.interceptors.request.use(
 
     // Check if window is defined (runs only on client-side)
     if (typeof window !== 'undefined') {
-      const token = localStorage.getItem('authToken');
+      const token = localStorage.getItem('token');
       if (token) {
         // Ensure headers object exists
         config.headers = config.headers || {};
@@ -67,8 +67,8 @@ axiosInstance.interceptors.response.use(
     // Example: Redirect to login on 401 Unauthorized
     if (error.response?.status === 401 && typeof window !== 'undefined') {
        console.warn('[Axios Response Interceptor] Unauthorized access detected. Clearing token and redirecting to login.');
-       localStorage.removeItem('authToken');
-       localStorage.removeItem('userStatus');
+       localStorage.removeItem('token');
+       localStorage.removeItem('user');
        // Redirect only if not already on the login page
        if (window.location.pathname !== '/') {
           window.location.href = '/'; // Force redirect for simplicity, or use router if available/needed

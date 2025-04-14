@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 // Import icons used in login page for consistency
 import { LockClosedIcon, EnvelopeIcon, UserIcon } from '@heroicons/react/24/outline'; 
 import { Montserrat, Inter } from 'next/font/google';
+import axiosInstance from '@/utils/axiosInstance';
 
 // Initialize fonts (same as login page)
 const montserrat = Montserrat({ subsets: ['latin'], weight: ['700', '800'] });
@@ -47,27 +48,22 @@ export default function SignupPage() {
         console.log(JSON.stringify(signupData, null, 2));
 
         try {
-            const response = await fetch('http://localhost:3001/api/auth/signup', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(signupData),
-            });
-            const responseData = await response.json();
-
-            if (!response.ok) {
-                let errorMessage = responseData.message || 'An error occurred during signup.';
-                if (responseData.errors && Array.isArray(responseData.errors)) {
-                    errorMessage = responseData.errors.map((err: any) => err.msg || 'Validation error').join(', ');
-                }
-                throw new Error(errorMessage);
-            }
+            const response = await axiosInstance.post('/api/auth/signup', signupData);
+            const responseData = response.data as {
+                token: string;
+                user: {
+                    status: string;
+                    [key: string]: any;
+                };
+                message?: string;
+            };
 
             console.log('Signup successful:', responseData);
 
             // --- Store token and user status --- 
             if (responseData.token && responseData.user && responseData.user.status) {
-                localStorage.setItem('authToken', responseData.token);
-                localStorage.setItem('userStatus', responseData.user.status);
+                localStorage.setItem('token', responseData.token);
+                localStorage.setItem('user', responseData.user.status);
                 // Optionally store userId and gender if needed immediately
                 if (responseData.user.id) localStorage.setItem('userId', responseData.user.id.toString());
                 if (responseData.user.gender) localStorage.setItem('userGender', responseData.user.gender);

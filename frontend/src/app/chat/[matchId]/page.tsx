@@ -6,6 +6,7 @@ import { useRouter, useSearchParams, useParams } from 'next/navigation';
 import io, { Socket } from 'socket.io-client';
 import { ArrowLeftIcon, PaperAirplaneIcon, ArrowLeftOnRectangleIcon } from '@heroicons/react/24/solid';
 import { Montserrat, Inter } from 'next/font/google';
+import axiosInstance from '@/utils/axiosInstance';
 
 // Initialize fonts
 const montserrat = Montserrat({ subsets: ['latin'], weight: ['600', '700'] });
@@ -43,13 +44,13 @@ function ChatContent() {
     // --- Fetch current user ID & Handle URL Token (Runs once or if searchParams change) ---
     useEffect(() => {
         const tokenFromUrl = searchParams.get('token');
-        let initialToken = localStorage.getItem('authToken');
+        let initialToken = localStorage.getItem('token');
         let userIdFromStorage = localStorage.getItem('userId');
 
         // Handle token potentially passed in URL (e.g., after OAuth callback)
         if (tokenFromUrl) {
             console.log('ChatContent: Token found in URL, saving...');
-            localStorage.setItem('authToken', tokenFromUrl);
+            localStorage.setItem('token', tokenFromUrl);
             initialToken = tokenFromUrl;
             // Clean the token from the URL without reloading
             const newUrl = new URL(window.location.href);
@@ -68,25 +69,16 @@ function ChatContent() {
                  console.error("ChatContent: Invalid User ID found in localStorage.");
                  setError("User information is invalid. Please log in again.");
                  localStorage.removeItem('userId'); // Remove invalid ID
-                 localStorage.removeItem('authToken'); // Also remove token as state is inconsistent
+                 localStorage.removeItem('token'); // Also remove token as state is inconsistent
                  router.push('/'); // Redirect to login
             }
         // If no valid userId in storage, but we have a token, fetch user info
         } else if (initialToken) {
             console.log('ChatContent: No userId in storage, fetching user info with token...');
-            // Use the correct API endpoint for user profile
-            fetch('http://localhost:3001/api/profile/me', {
-                 headers: { 'Authorization': `Bearer ${initialToken}` }
-             })
-             .then(async res => {
-                 if (res.status === 401 || res.status === 403) {
-                      throw new Error('Authentication failed');
-                 }
-                 // Handle 404 specifically if needed, though unlikely here if token is valid
-                 if (!res.ok) throw new Error(`Failed to fetch user info: ${res.statusText}`);
-                 return res.json();
-             })
-             .then(userInfo => {
+            // Use axiosInstance with the correct API endpoint for user profile
+            axiosInstance.get('/api/profile/me')
+             .then(response => {
+                 const userInfo = response.data as { id: number };
                  if (userInfo && userInfo.id) {
                      localStorage.setItem('userId', userInfo.id.toString());
                      setCurrentUserId(userInfo.id);
@@ -98,13 +90,13 @@ function ChatContent() {
              .catch(err => {
                   console.error("ChatContent: Error fetching user info:", err);
                   // Handle specific errors based on message
-                  if (err.message === 'Authentication failed') {
+                  if (err.response?.status === 401 || err.response?.status === 403) {
                        setError("Authentication failed. Please log in again.");
                   } else {
                        setError("Failed to fetch user information. Please log in again.");
                   }
-                  localStorage.removeItem('authToken'); // Clear token on fetch failure
-                  localStorage.removeItem('userId');   // Clear userId as well
+                  localStorage.removeItem('token'); // Clear token on fetch failure
+                  localStorage.removeItem('userId'); // Clear userId as well
                   router.push('/'); // Redirect to login
              });
         } else {
@@ -136,7 +128,7 @@ function ChatContent() {
 
         // **Important: Get token *inside* useEffect or use auth function**
         // Getting it here ensures the latest token is used if login happens while component is mounted
-        const token = localStorage.getItem('authToken');
+        const token = localStorage.getItem('token');
         if (!token) {
              setError("Authentication token not found. Login required.");
              router.push('/'); // Redirect to login if no token
@@ -157,11 +149,12 @@ function ChatContent() {
 
         // **Connect to Socket.IO server using function for auth option**
         console.log(`ChatContent: Preparing to connect socket...`);
-        const newSocket = io('http://localhost:3001', { // Your backend URL
+        const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
+        const newSocket = io(socketUrl, { // Use environment variable
             // Provide auth as a function to be called on each connection/reconnection attempt
             auth: (cb) => {
                 console.log("Auth function called. Getting token and matchId...");
-                const currentToken = localStorage.getItem('authToken'); // Get latest token
+                const currentToken = localStorage.getItem('token'); // Get latest token
                 // Ensure matchId from params is used (already validated above)
                 if (!currentToken) {
                     console.error("Auth function: No token found!");
@@ -200,17 +193,17 @@ function ChatContent() {
               // Provide more specific feedback based on backend error messages
               if (err.message.includes('Authentication error')) {
                   errorMsg = 'Connection failed due to authentication error. Please log in again.';
-                  localStorage.removeItem('authToken');
+                  localStorage.removeItem('token');
                   localStorage.removeItem('userId');
                   router.push('/');
               } else if (err.message.includes('User not found')) {
                    errorMsg = 'User information not found. Please log in again.';
-                    localStorage.removeItem('authToken');
+                    localStorage.removeItem('token');
                     localStorage.removeItem('userId');
                     router.push('/');
               } else if (err.message.includes('Invalid token')) {
                     errorMsg = 'Invalid token. Please log in again.';
-                     localStorage.removeItem('authToken');
+                     localStorage.removeItem('token');
                      localStorage.removeItem('userId');
                      router.push('/');
               } else if (err.message.includes('만료되었거나 유효하지 않은 채팅방입니다')) {

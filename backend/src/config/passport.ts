@@ -1,13 +1,30 @@
 import passport from 'passport';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import { Strategy as KakaoStrategy } from 'passport-kakao';
+import dotenv from 'dotenv';
 // import { User } from '../db/models'; // Adjust path if necessary
 const db = require('../../models'); // Correct path and use require
 const User = db.User;
 
+// 환경 변수 설정이 확실히 로드되었는지 확인
+dotenv.config();
+
+// 기본 URL 환경 변수가 없으면 localhost 사용
+const baseUrl = process.env.BASE_URL || 'http://localhost:3001';
+
+// 콜백 URL 환경 변수 또는 baseUrl 기반 기본값 사용
+const googleCallbackUrl = process.env.GOOGLE_CALLBACK_URL || `${baseUrl}/api/auth/google/callback`;
+const kakaoCallbackUrl = process.env.KAKAO_CALLBACK_URL || `${baseUrl}/api/auth/kakao/callback`;
+
 // TODO: Consider moving strategy callback logic to a dedicated controller/service
 
 export function configurePassport() {
+    console.log('[Passport] Configuring with:', {
+        googleCallbackUrl,
+        kakaoCallbackUrl,
+        envMode: process.env.NODE_ENV
+    });
+
     // Serialization
     passport.serializeUser((user: any, done) => {
         const userId = user?.id; // Prefer id from model if available
@@ -48,7 +65,7 @@ export function configurePassport() {
     passport.use(new GoogleStrategy({
         clientID: process.env.GOOGLE_CLIENT_ID!,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-        callbackURL: process.env.GOOGLE_CALLBACK_URL || "http://localhost:3001/api/auth/google/callback",
+        callbackURL: googleCallbackUrl,  // 환경 변수 사용
         scope: ['profile', 'email'],
         passReqToCallback: true
       },
@@ -84,7 +101,7 @@ export function configurePassport() {
     passport.use(new KakaoStrategy({
         clientID: process.env.KAKAO_CLIENT_ID!,
         clientSecret: process.env.KAKAO_CLIENT_SECRET!,
-        callbackURL: process.env.KAKAO_CALLBACK_URL || "http://localhost:3001/api/auth/kakao/callback",
+        callbackURL: kakaoCallbackUrl,  // 환경 변수 사용
         passReqToCallback: true
     },
     async (req: any, accessToken, refreshToken, profile, done) => {
