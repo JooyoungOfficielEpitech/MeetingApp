@@ -1,7 +1,12 @@
 import cors from 'cors';
 
-// TODO: Load origin from environment variables for different environments (dev, prod)
-const allowedOrigins = ['http://localhost:3000'];
+// Updated to include deployed frontend URLs
+const allowedOrigins = [
+  'http://localhost:3000',
+  'https://meeting-app-frontend-three.vercel.app',
+  'https://meeting-app-frontend.vercel.app',
+  'https://meetingapp-frontend.vercel.app'
+];
 
 export const corsOptions: cors.CorsOptions = {
   origin: function (origin, callback) {
