@@ -21,6 +21,11 @@ module.exports = (sequelize, DataTypes) => {
         foreignKey: 'user2Id',
         as: 'MatchesAsUser2' // Define an alias for this association
       });
+      // User has one MatchingWaitList entry
+      User.hasOne(models.MatchingWaitList, {
+        foreignKey: 'userId',
+        as: 'WaitlistEntry' // Optional alias
+      });
     }
   }
   User.init({

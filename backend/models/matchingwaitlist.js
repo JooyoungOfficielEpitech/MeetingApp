@@ -11,10 +11,26 @@ module.exports = (sequelize, DataTypes) => {
      */
     static associate(models) {
       // define association here
+      // MatchingWaitList belongs to one User
+      MatchingWaitList.belongsTo(models.User, {
+        foreignKey: 'userId',
+        as: 'User' // Optional alias
+      });
     }
   }
   MatchingWaitList.init({
-    userId: DataTypes.INTEGER
+    userId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      unique: true
+    },
+    gender: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      validate: {
+        isIn: [['male', 'female']]
+      }
+    }
   }, {
     sequelize,
     modelName: 'MatchingWaitList',

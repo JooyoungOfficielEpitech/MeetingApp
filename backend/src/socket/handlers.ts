@@ -327,21 +327,32 @@ export const handleConnection = (socket: any, ioInstance: SocketIOServer) => {
         }
 
         const leavingUserId = userId;
+        const leavingUserGender = userGender; // Get gender of the user leaving
         const matchIdToLeave = currentMatchId;
         currentMatchId = null; // Clear immediately
 
         let opponentUserId: number | null = null;
         let opponentSocketId: string | null = null;
+        let opponentGender: Gender | null = null;
 
         try {
             const match = await Match.findOne({ where: { matchId: matchIdToLeave } });
             if (match) {
                 opponentUserId = (match.user1Id === leavingUserId) ? match.user2Id : match.user1Id;
+                // Find opponent socket and gender
                 for (const [sid, connectedUser] of connectedUsers.entries()) {
                     if (connectedUser.userId === opponentUserId) {
                         opponentSocketId = sid;
+                        opponentGender = connectedUser.gender; // Get gender from map
                         break;
                     }
+                }
+                // If opponent not in map (offline), try DB for gender
+                if (!opponentGender && opponentUserId) {
+                     try {
+                         const opponentDb = await User.findByPk(opponentUserId, { attributes: ['gender'] });
+                         opponentGender = opponentDb?.gender ?? null;
+                     } catch (e: any) { console.error("Error checking offline opponent gender:", e); }
                 }
 
                 if (match.isActive) {
@@ -373,49 +384,54 @@ export const handleConnection = (socket: any, ioInstance: SocketIOServer) => {
 
                     // Add male user back to waitlist
                     let maleToAddBackId: number | null = null;
-                    const initiatorGender = userGender;
-                    const opponentData = opponentSocketId ? connectedUsers.get(opponentSocketId) : null;
-                    let opponentGender: Gender | null = opponentData?.gender ?? null;
-                    if (!opponentGender && opponentUserId) {
-                         try {
-                             const opponentDb = await User.findByPk(opponentUserId, { attributes: ['gender'] });
-                             opponentGender = opponentDb?.gender ?? null;
-                         } catch (e: any) { console.error("Error checking offline opponent gender:", e); }
-                    }
-                    if (initiatorGender === 'male') maleToAddBackId = leavingUserId;
+                    if (leavingUserGender === 'male') maleToAddBackId = leavingUserId;
                     else if (opponentGender === 'male') maleToAddBackId = opponentUserId;
                     if (maleToAddBackId) {
-                        MatchingWaitList.findOrCreate({ where: { userId: maleToAddBackId } })
+                        MatchingWaitList.findOrCreate({ where: { userId: maleToAddBackId }, defaults: { userId: maleToAddBackId, gender: 'male' }})
                             .then(([entry, created]: [any, boolean]) => {
-                                if (created) console.log(`Male user ${maleToAddBackId} added back to MatchingWaitList after match end.`);
+                                if (created) console.log(`Male user ${maleToAddBackId} added back to MatchingWaitList after match end (gender: male).`);
+                                else console.log(`Male user ${maleToAddBackId} was already in waitlist after match end? (Should not happen often)`);
                             })
                             .catch((error: any) => console.error(`Error adding male user ${maleToAddBackId} back to waitlist:`, error));
                     } else {
                         console.log("No male user identified to add back to waitlist.");
                     }
 
-                    // --- Emit confirmation to the user who left --- 
+                    // --- Emit 'match_update' to BOTH users --- 
+                    const leavingUserPayload = { status: leavingUserGender === 'male' ? 'waiting' : 'idle' };
+                    const opponentPayload = { status: opponentGender === 'male' ? 'waiting' : 'idle' };
+
+                    // Emit to leaving user
+                    ioInstance.to(socket.id).emit('match_update', leavingUserPayload);
+                    console.log(`[Force Leave] Sent match_update (${leavingUserPayload.status}) to leaving user ${leavingUserId}.`);
+
+                    // Emit to opponent if connected
+                    if (opponentSocketId) {
+                        ioInstance.to(opponentSocketId).emit('match_update', opponentPayload);
+                        console.log(`[Force Leave] Sent match_update (${opponentPayload.status}) to opponent ${opponentUserId}.`);
+                         // Also emit opponent-left-chat for specific handling if needed
+                         ioInstance.to(opponentSocketId).emit('opponent-left-chat', { userId: leavingUserId });
+                    }
+                    // ---------------------------------------------------
+
+                    // Emit confirmation to the user who left (keep this? maybe redundant)
                     socket.emit('force-leave-success', { matchId: matchIdToLeave });
-                    console.log(`[Force Leave] Emitted force-leave-success to user ${leavingUserId}.`);
-                    // -------------------------------------------------
 
                 } else {
                     console.log(`Match ${matchIdToLeave} was already inactive when user ${leavingUserId} tried to force leave.`);
-                    const initiatorInfo = connectedUsers.get(socket.id);
-                    if (initiatorInfo) initiatorInfo.isOccupied = false;
-                    await User.update({ occupation: false }, { where: { id: leavingUserId } });
+                    const leavingUserPayload = { status: leavingUserGender === 'male' ? 'waiting' : 'idle' };
+                    ioInstance.to(socket.id).emit('match_update', leavingUserPayload);
                     socket.emit('force-leave-success', { matchId: matchIdToLeave });
                 }
             } else {
                 console.warn(`Match ${matchIdToLeave} not found in DB when trying to force leave.`);
-                const initiatorInfo = connectedUsers.get(socket.id);
-                if (initiatorInfo) initiatorInfo.isOccupied = false;
-                await User.update({ occupation: false }, { where: { id: leavingUserId } });
+                const leavingUserPayload = { status: leavingUserGender === 'male' ? 'waiting' : 'idle' };
+                ioInstance.to(socket.id).emit('match_update', leavingUserPayload);
                 socket.emit('force-leave-success', { matchId: matchIdToLeave });
             }
         } catch (error) {
             console.error(`Error during force leave for match ${matchIdToLeave}:`, error);
-            socket.emit('force-leave-error', { message: 'Error leaving chat room.' }); // Send specific error event
+            socket.emit('force-leave-error', { message: 'Error leaving chat room.' });
             // Try to reset state even on error
             try {
                const initiatorInfo = connectedUsers.get(socket.id);

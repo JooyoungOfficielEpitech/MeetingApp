@@ -176,7 +176,7 @@ router.get('/matches/recent', async (req: Request, res: Response, next: NextFunc
                     attributes: ['id', 'name', 'gender']
                 }
             ],
-            attributes: ['matchId', 'status', 'createdAt']
+            attributes: ['matchId', 'isActive', 'createdAt']
         });
 
         console.log(`[Admin Matches] Found ${recentMatches.length} recent matches.`);
@@ -185,7 +185,7 @@ router.get('/matches/recent', async (req: Request, res: Response, next: NextFunc
             matchId: match.matchId,
             user1: match.User1 ? { id: match.User1.id, name: match.User1.name, gender: match.User1.gender } : null,
             user2: match.User2 ? { id: match.User2.id, name: match.User2.name, gender: match.User2.gender } : null,
-            status: match.status,
+            status: match.isActive ? 'active' : 'inactive',
             createdAt: match.createdAt
         }));
 
@@ -353,10 +353,10 @@ router.patch('/users/:userId/approve', async (req: Request, res: Response, next:
                 // Use findOrCreate to prevent duplicates if approval is somehow triggered multiple times
                 const [waitlistEntry, created] = await MatchingWaitList.findOrCreate({
                     where: { userId: user.id },
-                    defaults: { userId: user.id }
+                    defaults: { userId: user.id, gender: 'male' }
                 });
                 if (created) {
-                    console.log(`[Admin Approve] Male user ${userId} added to MatchingWaitList.`);
+                    console.log(`[Admin Approve] Male user ${userId} added to MatchingWaitList (gender: male).`);
                 } else {
                     console.log(`[Admin Approve] Male user ${userId} was already in MatchingWaitList.`);
                 }

@@ -389,10 +389,10 @@ router.post('/login',
                 try {
                     const [waitlistEntry, created] = await MatchingWaitList.findOrCreate({
                         where: { userId: user.id },
-                        defaults: { userId: user.id } // Create if not found
+                        defaults: { userId: user.id, gender: 'male' } // Add gender: 'male' here
                     });
                     if (created) {
-                        console.log(`Male user ${user.id} added to MatchingWaitList on login.`);
+                        console.log(`Male user ${user.id} added to MatchingWaitList on login (gender: male).`);
                     } else {
                         console.log(`Male user ${user.id} already in MatchingWaitList (login check).`);
                     }

@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { JWT_SECRET } from '../config/jwt'; // Import from config
 
 // Extend Express Request type to include user property
-interface AuthenticatedRequest extends Request {
+export interface AuthenticatedRequest extends Request {
     user?: { userId: number; email: string; status?: string; [key: string]: any }; // Define structure for req.user
 }
 

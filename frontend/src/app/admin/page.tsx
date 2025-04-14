@@ -139,7 +139,7 @@ export default function AdminDashboardPage() {
   };
 
   // Helper to determine match status display (keep)
-  const getMatchStatusDisplay = (status: string) => {
+  const getMatchStatusDisplay = (status: string | null) => {
     switch (status?.toLowerCase()) {
       case 'active': return { text: 'Active', color: 'bg-blue-500/20 text-blue-400' };
       case 'completed':

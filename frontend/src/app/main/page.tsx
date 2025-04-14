@@ -1,349 +1,318 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { UserCircleIcon } from '@heroicons/react/24/outline';
 import { useRouter } from 'next/navigation';
 import { Montserrat, Inter } from 'next/font/google'; // Import fonts
+import axiosInstance from '@/utils/axiosInstance'; // Use axiosInstance
 import io, { Socket } from 'socket.io-client'; // Import socket.io-client
 
 // Initialize fonts
 const montserrat = Montserrat({ subsets: ['latin'], weight: ['600', '700'] }); // Semibold/Bold weights
 const inter = Inter({ subsets: ['latin'] });
 
-interface ButtonState {
-    button_display: string;
-    active: boolean;
-    matchId: string | null;
+// User profile data structure (adjust as needed)
+interface UserProfile {
+    id: number;
+    email: string;
+    name: string;
+    gender: 'male' | 'female' | null;
+    status: string;
+    // ... other fields
 }
 
-interface MatchSuccessData { matchId: string; opponentId: number; }
+// WebSocket update payload structure
+interface MatchUpdatePayload {
+    status: 'matched' | 'finding' | 'idle' | 'waiting';
+    matchId?: string;
+}
 
 export default function MainPage() {
   const router = useRouter();
-  // Rename existing socketRef for temporary matching socket
-  const tempSocketRef = useRef<Socket | null>(null); 
-  // Add a new ref for the persistent main page socket
-  const mainSocketRef = useRef<Socket | null>(null);
+  const socketRef = useRef<Socket | null>(null);
   console.log("MainPage: Component rendering");
 
-  // --- State for Button --- 
-  const [buttonState, setButtonState] = useState<ButtonState | null>(null);
-  const [isLoadingButtonState, setIsLoadingButtonState] = useState(true);
-  const [isAttemptingMatch, setIsAttemptingMatch] = useState(false);
-  const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
-  // Add state for main socket connection status
-  const [isMainSocketConnected, setIsMainSocketConnected] = useState(false);
+  // --- State Variables --- 
+  const [isLoading, setIsLoading] = useState(true); // General loading state
+  const [error, setError] = useState<string | null>(null); // General error state
+  const [userInfo, setUserInfo] = useState<UserProfile | null>(null); // User info (incl. gender)
+  const [isFindingMatchFemale, setIsFindingMatchFemale] = useState(false); // Is FEMALE user actively finding (after clicking start)?
+  const [activeMatchId, setActiveMatchId] = useState<string | null>(null); // Store active match ID if user already has one
+  // --- End State Variables ---
 
-  // Mock data
-  const activeUsers = 127;
-  const estimatedTime = '2-3 min';
-
-  // --- Fetch Button State from API --- 
-  useEffect(() => {
-    console.log("MainPage: useEffect fetching button state...");
-    setIsLoadingButtonState(true);
-    const token = localStorage.getItem('authToken');
-
-    if (!token) {
-        console.log('MainPage: No token found, redirecting to login.');
-        setIsLoadingButtonState(false);
-        // Optionally clear state and redirect
-        setButtonState({ button_display: 'Login Required', active: false, matchId: null });
-        // router.push('/'); 
-        return;
-    }
-
-    const fetchButtonState = async () => {
-        try {
-            const response = await fetch('http://localhost:3001/api/main/button-state', {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            console.log("MainPage: API /button-state response status:", response.status);
-
-            if (response.ok) {
-                const data: ButtonState = await response.json();
-                console.log("MainPage: Received button state:", data);
-                setButtonState(data);
-                setActiveMatchId(data.matchId); // Sync activeMatchId state
-            } else if (response.status === 401) {
-                console.error('MainPage: Unauthorized fetching button state.');
-                setButtonState({ button_display: 'Login Required', active: false, matchId: null });
-                // router.push('/'); // Redirect on auth error
-            } else {
-                console.error('MainPage: Error fetching button state status:', response.statusText);
-                setButtonState({ button_display: 'Error Loading', active: false, matchId: null });
-            }
-        } catch (error) {
-            console.error('MainPage: Failed to fetch button state (catch block):', error);
-            setButtonState({ button_display: 'Error Loading', active: false, matchId: null });
-        } finally {
-            setIsLoadingButtonState(false);
-        }
-    };
-
-    fetchButtonState();
-
-    // Cleanup function for the effect (optional, if needed)
-    return () => {
-        // Perform cleanup if necessary, e.g., abort fetch requests
-    };
-  }, [router]); // Dependency array, re-run if router changes (might not be needed)
-
-  // --- Persistent Main Socket Connection --- 
+  // --- WebSocket Connection Effect --- 
   useEffect(() => {
     const token = localStorage.getItem('authToken');
     if (!token) {
-        console.log("MainPage: No token, cannot establish main socket connection.");
-        return; // Don't connect if no token
+      console.log("MainPage: No token found, cannot connect WebSocket.");
+      // Redirect or handle missing token appropriately
+      // router.push('/'); // Example redirect
+      return; // Prevent connection attempt
     }
 
-    // Disconnect existing main socket if it exists (e.g., HMR)
-    if (mainSocketRef.current) {
-        mainSocketRef.current.disconnect();
-    }
+    // Ensure environment variable is available client-side
+    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001'; 
+    console.log(`MainPage: Connecting WebSocket to ${socketUrl}`);
 
-    console.log("MainPage: Establishing persistent main socket connection...");
-    const socket = io('http://localhost:3001', { 
+    // Initialize socket connection
+    // Pass token in auth. No initial matchId needed for main page socket.
+    const socket = io(socketUrl, {
         auth: { token },
-        // No matchId needed here, just general connection
         // Consider adding reconnection options if needed
+        // reconnectionAttempts: 5,
+        // reconnectionDelay: 1000,
     });
-    mainSocketRef.current = socket;
+    socketRef.current = socket;
 
+    // --- Socket Event Listeners ---
     socket.on('connect', () => {
-        console.log('MainPage: Main socket connected. ID:', socket.id);
-        setIsMainSocketConnected(true);
+      console.log('MainPage: WebSocket connected, ID:', socket.id);
     });
 
-    socket.on('disconnect', (reason: string) => {
-        console.log('MainPage: Main socket disconnected. Reason:', reason);
-        setIsMainSocketConnected(false);
+    socket.on('disconnect', (reason) => {
+      console.log('MainPage: WebSocket disconnected, Reason:', reason);
+      // Optionally handle disconnection (e.g., show message, attempt reconnect)
     });
 
-    socket.on('connect_error', (err: Error) => {
-        console.error('MainPage: Main socket connection error:', err.message);
-        setIsMainSocketConnected(false);
-         // Handle auth errors specifically if needed
-         if (err.message.includes('Authentication error')) {
-             // Maybe force logout or show login required state?
-             setButtonState({ button_display: 'Login Required', active: false, matchId: null });
-         }
+    socket.on('connect_error', (err) => {
+      console.error('MainPage: WebSocket connection error:', err.message);
+      setError('Connection error. Please try again later.');
+      // Handle specific errors like auth failure
+      if (err.message.includes('Authentication error')) {
+           // Maybe force logout?
+           localStorage.removeItem('authToken');
+           router.push('/');
+      }
     });
 
-    // --- Listen for match success event (Real-time update for matched user) ---
-    socket.on('match-success', (data: MatchSuccessData) => {
-        console.log(`MainPage: Received 'match-success' via main socket! Match ID: ${data.matchId}`);
-        // Update button state immediately without calling API
-        setButtonState({
-            button_display: 'Go to Chat Room',
-            active: true,
-            matchId: data.matchId
-        });
-        setActiveMatchId(data.matchId);
-        // Optional: Alert the user they have been matched
-        // alert('You have been matched! Click \'Go to Chat Room\'.');
+    socket.on('match_update', (payload: MatchUpdatePayload) => {
+      console.log('[WebSocket] Received match_update event with payload:', payload);
+      try {
+          switch (payload.status) {
+            case 'matched':
+              console.log('[WebSocket] Updating state: matched, matchId:', payload.matchId);
+              setActiveMatchId(payload.matchId || null);
+              setIsFindingMatchFemale(false); 
+              break;
+            case 'finding': 
+              console.log('[WebSocket] Updating state: finding (female)');
+              setActiveMatchId(null);
+              setIsFindingMatchFemale(true);
+              break;
+            case 'idle': 
+              console.log('[WebSocket] Updating state: idle');
+              setActiveMatchId(null);
+              setIsFindingMatchFemale(false);
+              break;
+            case 'waiting': 
+              console.log('[WebSocket] Updating state: waiting (male)');
+              setActiveMatchId(null);
+              setIsFindingMatchFemale(false); 
+              break;
+            default:
+              console.warn('MainPage: Received unknown match_update status:', payload.status);
+          }
+          console.log('[WebSocket] State update potentially successful.');
+      } catch (stateUpdateError) {
+            console.error('[WebSocket] Error updating state after receiving match_update:', stateUpdateError);
+      }
     });
-    // ----------------------------------------------------------------------
 
-    // TODO: Add listener for 'match-terminated' event (Phase 3)
-    // socket.on('match-terminated', () => { ... fetchButtonState() ... });
-
-    // Cleanup on component unmount
+    // --- Cleanup on unmount --- 
     return () => {
-        console.log("MainPage: Unmounting, disconnecting main socket.");
-        socket.disconnect();
-        mainSocketRef.current = null;
-        setIsMainSocketConnected(false);
+      console.log("MainPage: Disconnecting WebSocket on unmount.");
+      socket.off('connect');
+      socket.off('disconnect');
+      socket.off('connect_error');
+      socket.off('match_update');
+      socket.disconnect();
+      socketRef.current = null;
     };
-  }, []); // Run only once on mount
+  }, [router]); // Dependency on router to handle redirects
 
-  const handleMatchClick = () => {
-    // Prevent action if button state is loading or we are already attempting match
-    if (isLoadingButtonState || isAttemptingMatch || !buttonState) return;
+  // --- Fetch User Info and Initial Match Status (runs once) --- 
+  useEffect(() => {
+    console.log("MainPage: useEffect fetching initial user info and match status...");
+    setIsLoading(true);
+    setError(null);
+    setActiveMatchId(null);
+    setIsFindingMatchFemale(false); 
 
-    // Determine action based on the button text from state
-    if (buttonState.button_display === 'Go to Chat Room') {
-        if (activeMatchId) { // Use the synced activeMatchId state
-            console.log(`Navigating to chat room for match: ${activeMatchId}`);
-            router.push(`/chat/${activeMatchId}`);
-        } else {
-             console.error("Button clicked for 'Go to Chat Room' but activeMatchId is null!");
-             // Maybe refetch state or show an error?
-        }
-    } else if (buttonState.button_display === 'Start Matching') {
-         // Ensure the button is actually active (redundant check due to disabled prop, but safe)
-         if (!buttonState.active) {
-             console.warn("Start Matching clicked but button is inactive.");
-             return;
-         }
+    const fetchInitialData = async () => {
+      try {
+          const profileResponse = await axiosInstance.get<UserProfile>('/api/profile/me');
+          const fetchedUser = profileResponse.data;
+          setUserInfo(fetchedUser);
+          console.log("MainPage: User info fetched:", fetchedUser);
 
-        console.log(`User starting matching attempt!`);
-        setIsAttemptingMatch(true);
+          // Still need to check initial active match via HTTP
+          if (fetchedUser && fetchedUser.id) { 
+              console.log(`MainPage: Checking initial active match status for user ${fetchedUser.id}...`);
+              try {
+                  const matchCheckResponse = await axiosInstance.get<{ matchId: string } | null>('/api/matches/active'); 
+                  console.log("MainPage: /api/matches/active response status:", matchCheckResponse.status);
+                  if (matchCheckResponse.status === 200 && matchCheckResponse.data?.matchId) {
+                      console.log("MainPage: Found existing active match on load:", matchCheckResponse.data.matchId);
+                      setActiveMatchId(matchCheckResponse.data.matchId);
+                  } else {
+                       // Catch cases where API might return 2xx without matchId (should ideally be 404)
+                       console.log("MainPage: No existing active match found on load (Non-200 or no matchId).");
+                       setActiveMatchId(null);
+                  }
+              } catch (matchError: any) {
+                  // Log the actual error received
+                  console.error("MainPage: Error during /api/matches/active call:", matchError.response?.status, matchError.response?.data || matchError.message);
+                  if (matchError.response?.status === 404) {
+                       console.log("MainPage: No existing active match found on load (404 received).");
+                       setActiveMatchId(null); // Explicitly set null on 404
+                  } else {
+                       // For other errors, don't assume no match, log error prominently
+                       console.error("MainPage: Unexpected error checking initial match status (/active).");
+                       setError("Failed to check current match status."); // Show error to user
+                       // Do NOT set activeMatchId to null here, as we don't know the actual state
+                  }
+              }
+          }
+      } catch (err: any) {
+          console.error('MainPage: Failed to fetch initial data:', err);
+          setError(err.response?.data?.message || 'Failed to load user data.');
+          if (err.response?.status === 401 || err.response?.status === 403) {
+              localStorage.removeItem('authToken');
+              router.push('/');
+          }
+      } finally {
+          setIsLoading(false);
+      }
+    };
 
-        const token = localStorage.getItem('authToken');
-        if (!token) {
-            alert('Authentication token not found. Please log in again.');
-            setIsAttemptingMatch(false);
-            setButtonState({ button_display: 'Login Required', active: false, matchId: null });
-            // router.push('/');
-            return;
-        }
+    fetchInitialData();
 
-        // Use tempSocketRef for the temporary connection
-        if (tempSocketRef.current) {
-            tempSocketRef.current.disconnect();
-            tempSocketRef.current = null;
-        }
-        const tempSocket = io('http://localhost:3001', { 
-            auth: { token },
-            forceNew: true 
-        });
-        tempSocketRef.current = tempSocket;
+    // No cleanup needed here as it runs only once
+  }, []); // Empty dependency array ensures this runs only once on mount
 
-        tempSocket.on('connect', () => {
-            console.log('MainPage: Temporary socket connected for matching attempt. ID:', tempSocket.id);
-            tempSocket.emit('start-matching');
-        });
+  // --- Handler Functions --- 
 
-        tempSocket.on('match-success', (data: { matchId: string; opponentId: number }) => {
-            console.log('MainPage: Match success received!', data);
-            alert('Match found! Connecting to chat room...');
-            setIsAttemptingMatch(false);
-            tempSocketRef.current = null; 
-            router.push(`/chat/${data.matchId}`);
-        });
+  const handleStartMatch = async () => {
+    if (isLoading || isFindingMatchFemale || userInfo?.gender !== 'female') return;
+    console.log("MainPage: handleStartMatch called (Female)");
+    // Optimistic UI update (optional, could rely solely on websocket)
+    // setIsFindingMatchFemale(true);
+    setIsLoading(true); // Show loading indicator during API call
+    setError(null);
 
-        tempSocket.on('no-opponent-available', (message: string) => {
-            console.log('MainPage: No opponent available.', message);
-            alert(message || 'No available users found. Please try again later.');
-            setIsAttemptingMatch(false);
-            tempSocketRef.current = null;
-            // Re-fetch button state as we are no longer attempting match
-            // fetchButtonState(); // Consider calling the fetch function again here or directly setting state
-            setButtonState({ button_display: 'Start Matching', active: true, matchId: null }); // Assuming female user
-        });
-
-        tempSocket.on('matching-error', (errorMessage: string) => {
-            console.error('MainPage: Matching error received:', errorMessage);
-            alert(`Matching failed: ${errorMessage || 'Unknown error'}`);
-            setIsAttemptingMatch(false);
-            tempSocketRef.current = null;
-            // Re-fetch button state on error
-            // fetchButtonState(); 
-            setButtonState({ button_display: 'Start Matching', active: true, matchId: null }); // Assuming female user
-        });
-
-        tempSocket.on('connect_error', (err: Error) => {
-            console.error('MainPage: Temporary socket connection error:', err.message);
-            alert(`Failed to connect to matching server: ${err.message}`);
-            setIsAttemptingMatch(false);
-            tempSocketRef.current = null;
-             // Re-fetch button state on connection error
-            // fetchButtonState(); 
-            setButtonState({ button_display: 'Start Matching', active: true, matchId: null }); // Assuming female user
-        });
-
-        tempSocket.on('disconnect', (reason: string) => {
-            console.log('MainPage: Temporary socket disconnected. Reason:', reason);
-            if (isAttemptingMatch) {
-               setIsAttemptingMatch(false);
-               // Optionally re-fetch state if disconnect was unexpected during attempt
-               // fetchButtonState();
-            }
-            tempSocketRef.current = null; 
-        });
-    } else {
-        console.warn(`handleMatchClick called with unknown button display text: ${buttonState.button_display}`);
+    try {
+      // No need to clear interval here
+      await axiosInstance.post('/api/matches/start');
+      // Backend will send 'match_update' via WebSocket on success (200 or 202)
+      console.log("MainPage: /api/matches/start request sent.");
+    } catch (err: any) {
+      console.error("MainPage: Error starting match (Female):", err);
+      setError(err.response?.data?.message || '매칭 시작 중 오류가 발생했습니다.');
+      // Reset optimistic UI if needed
+      // setIsFindingMatchFemale(false);
+    } finally {
+      setIsLoading(false); // Hide loading indicator
     }
   };
 
-  // Profile button click handler
-  const handleProfileClick = () => {
-    router.push('/profile'); // Navigate to '/profile'
+  const handleStopMatch = async () => {
+    if (isLoading || !isFindingMatchFemale || userInfo?.gender !== 'female') return;
+    console.log("MainPage: handleStopMatch called (Female)");
+    setIsLoading(true);
+    setError(null);
+
+    try {
+       // No need to clear interval here
+       await axiosInstance.post('/api/matches/stop');
+       // Backend will send 'match_update' via WebSocket on success
+       console.log("MainPage: /api/matches/stop request sent.");
+    } catch (err: any) { 
+        console.error("MainPage: Error stopping match (Female):", err);
+        setError(err.response?.data?.message || '매칭 중단 중 오류가 발생했습니다.');
+    } finally {
+        setIsLoading(false);
+    }
   };
 
-  // --- Determine Button Text and Disabled state based on API response --- 
-  let currentButtonText = 'Loading...';
-  let isButtonDisabled = true;
-  let showButton = false; // Default to false
+  const handleProfileClick = () => {
+    router.push('/profile'); // Navigate to profile page
+  };
 
-  if (isLoadingButtonState) {
-      currentButtonText = 'Loading...';
-      isButtonDisabled = true;
-      showButton = true; // Show loading indicator
-  } else if (buttonState) {
-      // Check for the specific case to hide the button: Inactive "Start Matching"
-      if (buttonState.button_display === 'Start Matching' && !buttonState.active) {
-          showButton = false; // Hide inactive "Start Matching" button for male users
-          console.log("Hiding button: Inactive Start Matching.");
-      } else {
-          // Show button for all other loaded states (Go to Chat, Active Start Matching, Error states)
-          showButton = true;
-          currentButtonText = isAttemptingMatch ? 'Attempting Match...' : buttonState.button_display;
-          // Disable based on API active state OR if currently attempting a match
-          isButtonDisabled = !buttonState.active || isAttemptingMatch;
-          // Ensure error states remain disabled
-          if (buttonState.button_display === 'Login Required' || buttonState.button_display === 'Error Loading') {
-              isButtonDisabled = true;
+  // --- Determine Button Text and Action --- 
+  let buttonText = 'Loading...';
+  let buttonAction: () => void = () => {};
+  let isButtonDisabled = true;
+
+  if (!isLoading) {
+      if (activeMatchId) {
+          buttonText = 'Go to Chat Room';
+          buttonAction = () => router.push(`/chat/${activeMatchId}`);
+          isButtonDisabled = false;
+      } else if (userInfo?.gender === 'female') {
+          if (isFindingMatchFemale) { // Check female finding state (set by websocket)
+              buttonText = 'Stop Finding Match';
+              buttonAction = handleStopMatch;
+              isButtonDisabled = false;
+          } else {
+              buttonText = 'Start Matching';
+              buttonAction = handleStartMatch;
+              isButtonDisabled = false; 
           }
+      } else if (userInfo?.gender === 'male') {
+          // Male users: Show disabled "Finding" state unless active match found
+          buttonText = 'Finding Opponent...'; 
+          buttonAction = () => {}; // No action for male button click
+          isButtonDisabled = true; 
+      } else {
+           // User profile not loaded or gender is null
+           buttonText = 'Complete Profile'; 
+           buttonAction = handleProfileClick; // Go to profile if gender is missing
+           isButtonDisabled = false;
       }
   }
-  // If initial load fails before buttonState is set, showButton remains false
-
-  // --- Add logs before returning JSX ---
-  console.log("[MainPage Render] State before render:", {
-      isLoadingButtonState,
-      isAttemptingMatch,
-      buttonState,
-      activeMatchId // Log synced ID
-  });
 
   return (
-    <div className={`flex flex-col min-h-screen bg-black text-slate-100 ${inter.className}`}> {/* Black background, Inter font */}
-      {/* Top Bar */}
-      <div className="sticky top-0 z-10 p-4 bg-gray-950 shadow-md"> {/* Dark gray bg */}
-        <div className="flex items-center justify-end">
-          {/* Profile Button */}
-          <button
-            onClick={handleProfileClick}
-            className="p-2 rounded-full hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-amber-500" // Rounded-full, Amber focus
-          >
-            <UserCircleIcon className="h-6 w-6 text-gray-300" />
-          </button>
-        </div>
-      </div>
+    <div className={`min-h-screen flex flex-col items-center justify-center bg-black text-slate-100 px-4 py-12 ${inter.className}`}>
+       {/* Profile Icon Top Right (Placeholder) */}
+       <button onClick={handleProfileClick} className="absolute top-6 right-6 text-slate-400 hover:text-amber-400">
+         <UserCircleIcon className="h-8 w-8" />
+       </button>
 
-      {/* Main Content Area */}
-      <main className="flex-grow p-4 space-y-4">
-        {/* Information Display */}
-        <div className="bg-gray-950 p-4 rounded-2xl flex justify-between items-center"> {/* Dark gray bg, rounded-2xl */}
-          <span className="text-slate-300">Online Users</span>
-          <span className={`font-semibold ${montserrat.className}`}>{activeUsers.toLocaleString()}</span> {/* Montserrat font */}
-        </div>
-        <div className="bg-gray-950 p-4 rounded-2xl flex justify-between items-center"> {/* Dark gray bg, rounded-2xl */}
-          <span className="text-slate-300">Avg Matching Time</span>
-          <span className={`font-semibold ${montserrat.className}`}>{estimatedTime}</span> {/* Montserrat font */}
-        </div>
-
-        {/* Additional main content can go here */}
-        {/* e.g., User cards, matching status display, etc. */}
-        <div className="flex-grow flex items-center justify-center text-gray-500">
-          {/* (Main content area placeholder) */}
-        </div>
-      </main>
-
-      {/* Bottom Button */}
-      {showButton && (
-          <div className="sticky bottom-0 p-4 bg-black border-t border-gray-800">
-              <button
-                onClick={handleMatchClick}
-                disabled={isButtonDisabled}
-                className={`w-full bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold py-3 px-4 rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-black focus:ring-amber-500 ${montserrat.className} disabled:opacity-50 disabled:cursor-not-allowed`} // Added cursor-not-allowed
-              >
-                {currentButtonText}
-              </button>
+      <div className="text-center max-w-md w-full">
+        {/* Logo or App Name */}
+        <div className="mb-12">
+           {/* Placeholder for Logo */}
+          <div className="w-24 h-24 bg-gradient-to-br from-amber-400 to-amber-600 rounded-full mx-auto flex items-center justify-center shadow-lg mb-4">
+             <span className={`text-4xl font-bold text-black ${montserrat.className}`}>N</span>
           </div>
-      )}
-    </div>
+          <h1 className={`text-4xl font-bold text-slate-100 ${montserrat.className}`}>App Name</h1> 
+          <p className="text-slate-400 mt-2">Find your connection.</p>
+        </div>
+
+        {/* Match Button */} 
+        <div className="mb-8">
+          <button
+            onClick={buttonAction}
+            disabled={isButtonDisabled}
+            className={`w-full px-8 py-4 rounded-full text-lg font-semibold transition-all duration-300 ease-in-out shadow-lg hover:shadow-xl disabled:opacity-60 disabled:cursor-not-allowed ${isFindingMatchFemale ? 'bg-gray-600 hover:bg-gray-500 text-white' : 'bg-amber-500 hover:bg-amber-600 text-black'} focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-black focus:ring-amber-400`}
+          >
+            {isLoading ? 'Loading...' : buttonText}
+          </button>
+           {/* Keep indicator for female finding state */} 
+           {isFindingMatchFemale && (
+                 <p className="text-sm text-amber-400 mt-4 animate-pulse">Searching for match...</p>
+            )}
+            {error && <p className="text-sm text-red-400 mt-4">Error: {error}</p>} 
+        </div>
+
+        {/* Info Text (Optional) */}
+        {/* 
+        <div className="text-slate-500 text-sm">
+          <p>현재 접속자: ... 명</p>
+          <p>예상 매칭 시간: ...</p>
+        </div>
+         */}
+      </div> 
+    </div> 
   );
 } 
