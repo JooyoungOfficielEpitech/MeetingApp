@@ -40,6 +40,8 @@ export default function CompleteProfilePage() {
     const router = useRouter();
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    // ★ State for rejection reason ★
+    const [rejectionReason, setRejectionReason] = useState<string | null>(null);
     
     // State for pre-filled data from session
     const [email, setEmail] = useState('');
@@ -148,6 +150,14 @@ export default function CompleteProfilePage() {
             fetchSessionData();
         }
         // ---------------------------
+
+        // ★ Read rejection reason from sessionStorage ★
+        const reason = sessionStorage.getItem('profileRejectionReason');
+        if (reason) {
+            console.log('[Complete Profile] Found rejection reason in sessionStorage:', reason);
+            setRejectionReason(reason);
+            sessionStorage.removeItem('profileRejectionReason'); // Clear after reading
+        }
 
     }, [router]);
 
@@ -385,6 +395,14 @@ export default function CompleteProfilePage() {
                         프로필을 완성하고 서비스를 시작하세요.
                      </p>
                 </div>
+
+                {/* ★ Display Rejection Reason if exists ★ */}
+                {rejectionReason && (
+                    <div className="mb-6 p-4 bg-yellow-900/50 border border-yellow-700 text-yellow-200 rounded-md">
+                        <p className="font-semibold">관리자 거절 사유:</p>
+                        <p>{rejectionReason}</p>
+                    </div>
+                )}
 
                 <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
                     {/* Age Input */}

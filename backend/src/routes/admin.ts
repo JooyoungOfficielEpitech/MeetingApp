@@ -18,6 +18,7 @@ const MatchingWaitList = db.MatchingWaitList; // Make sure this is imported
 // import { connectedUsers } from '../server'; // Placeholder - Adjust import based on actual export -- Incorrect path
 import { connectedUsers } from '../socket/state'; // Correct: Import from socket state module
 import { JWT_SECRET } from '../config/jwt'; // Import JWT_SECRET from config
+const Message = db.Message; // ★ Add Message model ★
 
 const router = express.Router();
 
@@ -47,6 +48,9 @@ router.use(isAdmin as express.RequestHandler);
  *                 newSignupsToday: 
  *                   type: integer
  *                   description: Number of users who signed up today
+ *                 pendingApprovalCount:
+ *                   type: integer
+ *                   description: Number of users pending administrator approval
  *       401:
  *         description: Authentication token required
  *       403:
@@ -83,9 +87,19 @@ router.get('/stats/dashboard', async (req: Request, res: Response, next: NextFun
         });
         console.log(`[Admin Stats] New signups today: ${newSignupsToday}`);
 
+        // 3. Get number of users pending approval
+        const pendingApprovalCount = await User.count({
+            where: {
+                status: 'pending_approval',
+                deletedAt: null
+            }
+        });
+        console.log(`[Admin Stats] Pending approval count: ${pendingApprovalCount}`);
+
         res.status(200).json({
             totalUsers,       // Renamed from activeUsers for clarity, as it's total for now
-            newSignupsToday
+            newSignupsToday,
+            pendingApprovalCount
         });
 
     } catch (error) {
@@ -149,30 +163,29 @@ router.get('/matches/recent', async (req: Request, res: Response, next: NextFunc
     try {
         const recentMatches = await Match.findAll({
             limit: limit,
-            order: [['createdAt', 'DESC']], // Get the most recent matches
+            order: [['createdAt', 'DESC']],
             include: [
                 {
-                    model: User, // Include User model for user1
-                    as: 'User1', // Use the alias defined in the association
-                    attributes: ['id', 'name'] // Select only necessary fields
+                    model: User,
+                    as: 'User1',
+                    attributes: ['id', 'name', 'gender']
                 },
                 {
-                    model: User, // Include User model for user2
-                    as: 'User2', // Use the alias defined in the association
-                    attributes: ['id', 'name'] // Select only necessary fields
+                    model: User,
+                    as: 'User2',
+                    attributes: ['id', 'name', 'gender']
                 }
             ],
-            attributes: ['matchId', 'status', 'createdAt'] // Select Match fields
+            attributes: ['matchId', 'status', 'createdAt']
         });
 
         console.log(`[Admin Matches] Found ${recentMatches.length} recent matches.`);
 
-        // Format the response (optional, but good practice)
         const formattedMatches = recentMatches.map((match: any) => ({
             matchId: match.matchId,
-            user1: match.User1 ? { id: match.User1.id, name: match.User1.name } : null,
-            user2: match.User2 ? { id: match.User2.id, name: match.User2.name } : null,
-            status: match.status, // Assuming Match model has a 'status' field
+            user1: match.User1 ? { id: match.User1.id, name: match.User1.name, gender: match.User1.gender } : null,
+            user2: match.User2 ? { id: match.User2.id, name: match.User2.name, gender: match.User2.gender } : null,
+            status: match.status,
             createdAt: match.createdAt
         }));
 
@@ -180,7 +193,7 @@ router.get('/matches/recent', async (req: Request, res: Response, next: NextFunc
 
     } catch (error) {
         console.error('[GET /api/admin/matches/recent] Error fetching recent matches:', error);
-        next(error); // Pass error to the global error handler
+        next(error);
     }
 });
 
@@ -330,6 +343,7 @@ router.patch('/users/:userId/approve', async (req: Request, res: Response, next:
         // Update status to active
         user.status = 'active';
         user.occupation = false; // Ensure occupation is false upon approval
+        user.rejectionReason = null; // ★ Clear any previous rejection reason
         await user.save();
         console.log(`[Admin Approve] User ${userId} status updated to 'active'.`);
 
@@ -419,7 +433,7 @@ router.patch('/users/:userId/approve', async (req: Request, res: Response, next:
  *         schema: { type: integer }
  *         description: ID of the user to reject
  *     responses:
- *       200: { description: 'User rejected successfully' }
+ *       200: { description: 'User rejected successfully.' }
  *       400: { description: 'User is not pending approval' }
  *       401: { description: 'Authentication token required' }
  *       403: { description: 'Forbidden (not an admin or user not found)' }
@@ -427,49 +441,47 @@ router.patch('/users/:userId/approve', async (req: Request, res: Response, next:
  */
 router.patch('/users/:userId/reject', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const userId = parseInt(req.params.userId, 10);
-    const io = (req as any).io; // Get io instance from req
-    console.log(`[PATCH /api/admin/users/${userId}/reject] Request received.`);
+    const { reason } = req.body; // Get reason from request body
+    const ioInstance = io; // Use imported io instance
+
+    console.log(`[PATCH /api/admin/users/${userId}/reject] Request received. Reason: ${reason}`);
 
      if (isNaN(userId)) {
         res.status(400).json({ message: 'Invalid user ID' });
-        return; // Return void
+        return; 
+    }
+    if (!reason || typeof reason !== 'string' || reason.trim().length === 0) { // Validate reason
+         res.status(400).json({ message: 'Rejection reason is required.' });
+         return;
     }
 
     try {
-        // Find user who is 'pending_approval' OR 'active' and not deleted
+        // Find user who is specifically 'pending_approval'
         const user = await User.findOne({
             where: {
                 id: userId,
-                status: { [Op.in]: ['pending_approval', 'active'] }, // Allow rejecting pending or active users
+                status: 'pending_approval', // Only allow rejecting pending users
                 deletedAt: null
             }
         });
 
         if (!user) {
-             console.warn(`[Admin Reject] User ${userId} not found, not rejectable (status might be '${user?.status}', or deleted).`);
-             const existingUser = await User.findByPk(userId);
-             if (!existingUser) {
-                 res.status(404).json({ message: 'User not found.' });
-             } else if (existingUser.status === 'rejected') {
-                 res.status(400).json({ message: 'User is already rejected.' });
-             } else if (existingUser.deletedAt) {
-                 res.status(400).json({ message: 'User is deleted.' });
-             } else {
-                 // Should not happen based on the findOne query, but handle defensively
-                 res.status(400).json({ message: `User cannot be rejected (current status: ${existingUser.status}).`});
-             }
-             return; // Return void
+             console.warn(`[Admin Reject] User ${userId} not found or not in pending_approval status.`);
+             res.status(404).json({ message: 'User not found or cannot be rejected.' });
+             return; 
         }
 
-        // Update status to 'rejected'
-        user.status = 'rejected';
-        // Optionally: Set deletion timestamp if using soft delete
-        // user.deletedAt = new Date();
-        await user.save();
-        console.log(`[Admin Reject] User ${userId} status updated to 'rejected'.`);
+        // --- Update status to rejected and record reason --- 
+        await user.update({ 
+            status: 'rejected', // ★ Change status to rejected ★
+            rejectionReason: reason.trim() 
+        });
+        console.log(`[Admin Reject] User ${userId} status updated to 'rejected'. Reason: ${reason.trim()}`);
+        // ------------------------------------------------------
 
         // --- Emit WebSocket event to the rejected user --- 
-        if (io && connectedUsers) {
+        // Still useful to notify the user their profile was reviewed and rejected
+        if (ioInstance && connectedUsers) {
             let userSocketId: string | null = null;
             for (const [socketId, connectedUser] of connectedUsers.entries()) {
                 if (connectedUser.userId === userId) {
@@ -479,25 +491,26 @@ router.patch('/users/:userId/reject', async (req: Request, res: Response, next: 
             }
 
             if (userSocketId) {
-                console.log(`[Admin Reject] Emitting 'userRejected' event to socket ${userSocketId} for user ${userId}`);
-                io.to(userSocketId).emit('userRejected', {
-                    message: 'Your account registration was rejected and will be deleted. Please contact support if you believe this is an error.'
+                console.log(`[Admin Reject] Emitting 'profileRejected' event to socket ${userSocketId} for user ${userId}`);
+                // Emit 'profileRejected' with the reason 
+                ioInstance.to(userSocketId).emit('profileRejected', {
+                    reason: reason.trim(),
+                    message: 'Your profile submission was rejected. Please review the reason and update your profile.'
                 });
-                 // Optionally disconnect the socket after sending the message
-                 // io.sockets.sockets.get(userSocketId)?.disconnect();
             } else {
-                console.log(`[Admin Reject] Socket not found for rejected user ${userId}. Cannot send real-time update.`);
+                console.log(`[Admin Reject] Socket not found for user ${userId}. Cannot send real-time update.`);
             }
         } else {
              console.warn('[Admin Reject] Socket.IO instance or connectedUsers map not available. Cannot send real-time update.');
         }
         // ---------------------------------------------------
 
-        res.status(200).json({ message: 'User rejected successfully' });
+        // Respond with success, indicating user was rejected
+        res.status(200).json({ message: 'User rejected successfully.' }); // ★ Updated response message ★
 
     } catch (error) {
-        console.error(`[PATCH /api/admin/users/${userId}/reject] Error rejecting user:`, error);
-        next(error); // Pass error to middleware
+        console.error(`[PATCH /api/admin/users/${userId}/reject] Error processing rejection:`, error);
+        next(error); 
     }
 });
 
@@ -678,6 +691,79 @@ router.delete('/users/:userId', async (req: Request, res: Response, next: NextFu
 
     } catch (error) {
         console.error(`[DELETE /api/admin/users/${userId}] Error deleting user:`, error);
+        next(error);
+    }
+});
+
+/**
+ * @swagger
+ * /api/admin/chats/{matchId}/messages:
+ *   get:
+ *     summary: Get all messages for a specific match (admin only)
+ *     tags: [Admin, Chats]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: matchId
+ *         required: true
+ *         schema: { type: string }
+ *         description: The ID of the match (e.g., match-1-2-123456789)
+ *     responses:
+ *       200:
+ *         description: Messages retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/ChatMessage' # Assuming a ChatMessage schema exists
+ *       400: { description: 'Invalid match ID format' }
+ *       401: { description: 'Authentication token required' }
+ *       403: { description: 'Forbidden (not an admin)' }
+ *       404: { description: 'Match not found or no messages found' }
+ *       500: { description: 'Server error' }
+ */
+router.get('/chats/:matchId/messages', isAdmin, async (req: Request, res: Response, next: NextFunction) => {
+    const matchId = req.params.matchId;
+    console.log(`[GET /api/admin/chats/${matchId}/messages] Request received.`);
+
+    if (!matchId || !matchId.startsWith('match-')) {
+        res.status(400).json({ message: 'Invalid match ID format.' });
+        return; // ★ Add return to fix lint error ★
+    }
+
+    try {
+        const messages = await Message.findAll({
+            where: { matchId: matchId },
+            order: [['createdAt', 'ASC']],
+            include: [
+                {
+                    model: User,
+                    as: 'Sender',
+                    attributes: ['id', 'name', 'gender']
+                }
+            ],
+        });
+
+        if (!messages || messages.length === 0) {
+            const matchExists = await Match.findOne({ where: { matchId: matchId }});
+            if (!matchExists) {
+                console.log(`[Admin Chat] Match not found: ${matchId}`);
+                 res.status(404).json({ message: 'Match not found.' });
+                 return; // ★ Add return ★
+            }
+            console.log(`[Admin Chat] No messages found for match: ${matchId}`);
+            res.status(200).json([]); 
+            return; // ★ Add return ★
+        }
+
+        console.log(`[Admin Chat] Retrieved ${messages.length} messages for match: ${matchId}`);
+        res.status(200).json(messages);
+        return; // ★ Add return ★
+
+    } catch (error) {
+        console.error(`[GET /api/admin/chats/${matchId}/messages] Error fetching messages:`, error);
         next(error);
     }
 });

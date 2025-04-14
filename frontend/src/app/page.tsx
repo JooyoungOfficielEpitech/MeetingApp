@@ -98,7 +98,7 @@ export default function LoginPage() {
         {/* Simple Text Logo Example with New Accent Color */}
         <div className="text-center">
            {/* Replace with your actual logo if available */}
-           <span className={`text-5xl font-bold text-amber-400 ${montserrat.className}`}>Lo??ㅇㅇ?go</span> {/* Apply Montserrat Bold to Logo */}
+           <span className={`text-5xl font-bold text-amber-400 ${montserrat.className}`}>Logo</span> {/* Apply Montserrat Bold to Logo */}
            {/* <p className="mt-1 text-sm text-slate-400">CoffeeMeetsBagel</p> Optional Tagline */}
         </div>
 

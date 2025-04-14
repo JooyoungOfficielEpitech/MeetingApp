@@ -58,10 +58,12 @@ export default function PendingApprovalPage() {
             }
         });
 
-        socket.on('userRejected', (data: { message?: string }) => {
+        socket.on('userRejected', (data: { reason?: string; message?: string }) => {
             console.log('[Pending Page] Received userRejected event:', data);
-            const message = data?.message || 'Your account registration was rejected.';
-            alert(message);
+            const customReason = data?.reason;
+            const baseMessage = data?.message || 'Your account registration was rejected.';
+            const finalMessage = customReason ? `${baseMessage}\n\nReason: ${customReason}` : baseMessage;
+            alert(finalMessage);
             localStorage.removeItem('authToken');
             localStorage.removeItem('userStatus');
             localStorage.removeItem('userId');
@@ -69,6 +71,21 @@ export default function PendingApprovalPage() {
             socket.disconnect();
             socketRef.current = null;
             router.push('/');
+        });
+
+        // ★ Listen for profile rejection ★
+        socket.on('profileRejected', (data: { reason?: string; message?: string }) => {
+            console.log('[Pending Page] Received profileRejected event:', data);
+            const reason = data?.reason || 'No specific reason provided.';
+            const message = data?.message || 'Your profile submission was rejected.';
+            alert(`${message}\n\nReason: ${reason}\n\nYou will be redirected to update your profile.`);
+            // ★ Store reason in sessionStorage before redirecting ★
+            sessionStorage.setItem('profileRejectionReason', reason); 
+            // Disconnect socket before redirecting
+            socket.disconnect();
+            socketRef.current = null;
+            // Redirect to profile completion page
+            router.push('/signup/complete-profile'); // ★ Redirect to profile update page
         });
     }
 

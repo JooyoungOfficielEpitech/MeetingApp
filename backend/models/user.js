@@ -90,6 +90,11 @@ module.exports = (sequelize, DataTypes) => {
         isIn: [['pending_approval', 'active', 'rejected', 'suspended']]
       }
     },
+    rejectionReason: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      comment: 'Reason for profile rejection by admin'
+    },
     deletedAt: {
       type: DataTypes.DATE,
       allowNull: true,

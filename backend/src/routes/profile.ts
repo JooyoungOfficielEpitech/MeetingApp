@@ -165,47 +165,62 @@ router.put('/me', authenticateToken, (async (req: Request, res: Response, next: 
 
         console.log('Request body for update:', req.body);
         // Filter request body to include only allowed fields
+        let hasUpdates = false;
         for (const key of allowedUpdates) {
             if (Object.prototype.hasOwnProperty.call(req.body, key)) { // More robust check
                 // Allow setting null explicitly for fields like dob, weight etc.
                 updates[key] = req.body[key]; 
+                hasUpdates = true;
             }
         }
         console.log('Applying updates:', updates);
 
-        // Update user (Sequelize handles partial updates)
-        await user.update(updates);
-        console.log(`User ${userId} updated successfully with fields:`, Object.keys(updates));
+        // Update user only if there are fields to update
+        if (hasUpdates) {
+            await user.update(updates);
+            console.log(`User ${userId} updated successfully with fields:`, Object.keys(updates));
 
-        // Recalculate age if dob was updated
-        if ('dob' in updates) { 
-            console.log('DOB updated, recalculating age...');
-            try {
-                 if (updates.dob) { 
-                    const birthDate = new Date(updates.dob);
-                    const today = new Date();
-                    let age = today.getFullYear() - birthDate.getFullYear();
-                    const m = today.getMonth() - birthDate.getMonth();
-                    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-                        age--;
-                    }
-                    if (!isNaN(age) && age >= 0) {
-                         await user.update({ age: age });
-                         console.log(`Age recalculated and updated to: ${age}`);
+            // Recalculate age if dob was updated
+            if ('dob' in updates) { 
+                console.log('DOB updated, recalculating age...');
+                try {
+                     if (updates.dob) { 
+                        const birthDate = new Date(updates.dob);
+                        const today = new Date();
+                        let age = today.getFullYear() - birthDate.getFullYear();
+                        const m = today.getMonth() - birthDate.getMonth();
+                        if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+                            age--;
+                        }
+                        if (!isNaN(age) && age >= 0) {
+                             await user.update({ age: age });
+                             console.log(`Age recalculated and updated to: ${age}`);
+                        } else {
+                             console.warn('Invalid date resulted in invalid age for user:', userId);
+                             await user.update({ age: null }); 
+                             console.log('Age set to null due to invalid DOB calculation.');
+                        }
                     } else {
-                         console.warn('Invalid date resulted in invalid age for user:', userId);
-                         await user.update({ age: null }); 
-                         console.log('Age set to null due to invalid DOB calculation.');
+                        await user.update({ age: null });
+                        console.log('DOB set to null, age also set to null.');
                     }
-                } else {
-                    await user.update({ age: null });
-                    console.log('DOB set to null, age also set to null.');
+                } catch (error) {
+                    console.error("Error calculating/updating age:", error);
+                     await user.update({ age: null }); 
+                     console.log('Age set to null due to error during calculation.');
                 }
-            } catch (error) {
-                console.error("Error calculating/updating age:", error);
-                 await user.update({ age: null }); 
-                 console.log('Age set to null due to error during calculation.');
             }
+
+            // ★ Update status to pending_approval and clear rejection reason after any profile update ★
+            await user.update({
+                status: 'pending_approval',
+                rejectionReason: null
+            });
+            console.log(`User ${userId} status set to pending_approval and rejection reason cleared after profile update.`);
+            // ---------------------------------------------------------------------------------------
+
+        } else {
+            console.log(`No updatable fields provided for user ${userId}. Skipping update.`);
         }
 
         console.log(`Refetching updated user profile for ID: ${userId}`);
@@ -434,9 +449,10 @@ router.post(
                 profileImageUrls: profileImageUrls,
                 businessCardImageUrl: businessCardImageUrl,
                 status: 'pending_approval', // Set status to pending after completion
+                rejectionReason: null, // ★ Clear rejection reason upon successful completion/resubmission ★
                 occupation: false, // Keep occupation false until admin approves
             });
-            console.log(`[complete-regular] User ${userId} profile completed, status set to pending_approval.`);
+            console.log(`[complete-regular] User ${userId} profile completed, status set to pending_approval, rejection reason cleared.`);
             // -------------------------
 
             // --- Generate NEW token with pending_approval status --- 
