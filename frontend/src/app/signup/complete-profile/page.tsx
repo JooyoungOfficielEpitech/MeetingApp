@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, ChangeEvent } from 'react';
+import React, { useState, useEffect, ChangeEvent, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 // Import icons for consistency 
@@ -54,7 +54,8 @@ interface ProfileFormData {
   [key: string]: string | undefined;
 }
 
-export default function CompleteProfilePage() {
+// Client Component that uses useSearchParams
+function CompleteProfileContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const isNewUser = searchParams.get('newUser') === 'true' || searchParams.get('isNewUser') === 'true';
@@ -619,5 +620,21 @@ export default function CompleteProfilePage() {
                 </form>
             </div>
         </div>
+    );
+}
+
+// Main page component with Suspense
+export default function CompleteProfilePage() {
+    return (
+        <Suspense fallback={
+            <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">
+                <div className="text-center">
+                    <p className="text-xl font-semibold">로딩 중...</p>
+                    <p className="text-gray-400 mt-2">잠시만 기다려주세요.</p>
+                </div>
+            </div>
+        }>
+            <CompleteProfileContent />
+        </Suspense>
     );
 }
