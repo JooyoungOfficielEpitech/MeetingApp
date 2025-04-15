@@ -17,8 +17,6 @@ export default function SignupPage() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [passwordConfirm, setPasswordConfirm] = useState('');
-    const [name, setName] = useState('');
-    const [gender, setGender] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -30,18 +28,12 @@ export default function SignupPage() {
         setError(null);
 
         if (password !== passwordConfirm) {
-            setError('Passwords do not match.');
+            setError('비밀번호가 일치하지 않습니다.');
             setIsLoading(false);
             return;
         }
 
-        if (!gender) {
-            setError('Please select your gender.');
-            setIsLoading(false);
-            return;
-        }
-
-        const signupData = { email, password, name, gender };
+        const signupData = { email, password };
 
         console.log('--- Sending Sign Up Request ---');
         console.log('POST /api/auth/signup');
@@ -61,27 +53,25 @@ export default function SignupPage() {
             console.log('Signup successful:', responseData);
 
             // --- Store token and user status --- 
-            if (responseData.token && responseData.user && responseData.user.status) {
+            if (responseData.token && responseData.user) {
                 localStorage.setItem('token', responseData.token);
-                localStorage.setItem('user', responseData.user.status);
-                // Optionally store userId and gender if needed immediately
+                if (responseData.user.status) localStorage.setItem('user', responseData.user.status);
                 if (responseData.user.id) localStorage.setItem('userId', responseData.user.id.toString());
-                if (responseData.user.gender) localStorage.setItem('userGender', responseData.user.gender);
                 
                 console.log('Token and status saved to localStorage.');
 
-                // --- Redirect to Profile Completion page --- 
+                // 프로필 완성 페이지로 리디렉션
+                console.log('Redirecting to complete-profile page');
                 alert('회원가입 성공! 프로필 완성을 위해 추가 정보를 입력해주세요.');
-                router.push('/signup/complete-profile');
-                // -------------------------------------------
+                router.push('/signup/complete-profile?isNewUser=true');
             } else {
                 console.error('Signup response missing token or user status.', responseData);
-                setError('Signup completed, but failed to initialize session. Please try logging in.');
+                setError('회원가입은 완료되었으나 세션 초기화에 실패했습니다. 로그인을 시도해주세요.');
             }
 
         } catch (err: any) {
             console.error('Signup Error:', err);
-            setError(err.message || 'An error occurred during signup.');
+            setError(err.response?.data?.message || err.message || '회원가입 중 오류가 발생했습니다.');
         } finally {
             setIsLoading(false);
         }
@@ -102,13 +92,16 @@ export default function SignupPage() {
                 {/* Consistent Logo/Header */}
                 <div className="text-center">
                     <span className={`text-5xl font-bold text-amber-400 ${montserrat.className}`}>Logo</span> 
-                    <h2 className="mt-4 text-center text-2xl font-bold tracking-tight text-slate-200">Create your account</h2>
+                    <h2 className="mt-4 text-center text-2xl font-bold tracking-tight text-slate-200">계정 생성하기</h2>
+                    <p className="mt-2 text-center text-sm text-slate-400">
+                        기본 정보를 입력하고 회원가입을 완료하세요
+                    </p>
                 </div>
 
                 <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
                     {/* Email Input (with icon) */}
                     <div>
-                        <label htmlFor="email" className={labelStyle}>Email address</label>
+                        <label htmlFor="email" className={labelStyle}>이메일</label>
                         <div className="relative mt-1">
                             <div className={iconWrapperStyle}>
                                 <EnvelopeIcon className="h-5 w-5 text-slate-500" aria-hidden="true" />
@@ -120,57 +113,16 @@ export default function SignupPage() {
                                 autoComplete="email"
                                 required
                                 className={inputBaseStyle} 
-                                placeholder="Email address"
+                                placeholder="이메일 주소"
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
                             />
                         </div>
                     </div>
 
-                    {/* Name Input (with icon) */}
-                    <div>
-                        <label htmlFor="name" className={labelStyle}>Name</label>
-                        <div className="relative mt-1">
-                             <div className={iconWrapperStyle}>
-                                 <UserIcon className="h-5 w-5 text-slate-500" aria-hidden="true" />
-                             </div>
-                             <input
-                                id="name"
-                                name="name"
-                                type="text"
-                                autoComplete="name"
-                                required
-                                className={inputBaseStyle} 
-                                placeholder="Name"
-                                value={name}
-                                onChange={(e) => setName(e.target.value)}
-                            />
-                        </div>
-                    </div>
-
-                    {/* Gender Selection */}
-                    <div>
-                        <label htmlFor="gender" className={labelStyle}>Gender</label>
-                        <div className="mt-1">
-                            <select
-                                id="gender"
-                                name="gender"
-                                required
-                                value={gender}
-                                onChange={(e) => setGender(e.target.value)}
-                                className={`${inputBaseStyle} pl-3`}
-                            >
-                                <option value="" disabled>Select your gender</option>
-                                <option value="male">Male</option>
-                                <option value="female">Female</option>
-                                <option value="other">Other</option>
-                            </select>
-                        </div>
-                    </div>
-
                     {/* Password Input (with icon) */}
                     <div>
-                        <label htmlFor="password" className={labelStyle}>Password</label>
+                        <label htmlFor="password" className={labelStyle}>비밀번호</label>
                         <div className="relative mt-1">
                             <div className={iconWrapperStyle}>
                                 <LockClosedIcon className="h-5 w-5 text-slate-500" aria-hidden="true" />
@@ -183,7 +135,7 @@ export default function SignupPage() {
                                 required
                                 minLength={6}
                                 className={inputBaseStyle} 
-                                placeholder="Password (min. 6 characters)"
+                                placeholder="비밀번호 (6자 이상)"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                             />
@@ -192,7 +144,7 @@ export default function SignupPage() {
 
                     {/* Confirm Password Input (with icon) */}
                     <div>
-                        <label htmlFor="password-confirm" className={labelStyle}>Confirm Password</label>
+                        <label htmlFor="password-confirm" className={labelStyle}>비밀번호 확인</label>
                         <div className="relative mt-1">
                             <div className={iconWrapperStyle}>
                                 <LockClosedIcon className="h-5 w-5 text-slate-500" aria-hidden="true" />
@@ -204,7 +156,7 @@ export default function SignupPage() {
                                 autoComplete="new-password"
                                 required
                                 className={inputBaseStyle} 
-                                placeholder="Confirm Password"
+                                placeholder="비밀번호 확인"
                                 value={passwordConfirm}
                                 onChange={(e) => setPasswordConfirm(e.target.value)}
                             />
@@ -225,17 +177,17 @@ export default function SignupPage() {
                             disabled={isLoading}
                             className={`${buttonBaseStyle} bg-amber-500 hover:bg-amber-600 text-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-800 focus:ring-amber-500 ${montserrat.className} font-semibold ${isLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
                         >
-                            {isLoading ? 'Creating Account...' : 'Sign Up'}
+                            {isLoading ? '처리 중...' : '회원가입'}
                         </button>
                     </div>
                 </form>
 
                 {/* Link to Login (consistent style) */}
                 <div className="text-center text-sm">
-                    <span className="text-slate-400">Already have an account? </span>
+                    <span className="text-slate-400">이미 계정이 있으신가요? </span>
                     <Link href="/" legacyBehavior>
                         <a className="font-medium text-amber-400 hover:text-amber-300">
-                            Log in
+                            로그인
                         </a>
                     </Link>
                 </div>

@@ -79,6 +79,9 @@ const AdminTierPage: React.FC = () => {
     // ★ State for the status filter ★
     const [statusFilter, setStatusFilter] = useState<string>(''); // Empty string means 'all'
 
+    // ★ State for gender filter ★
+    const [genderFilter, setGenderFilter] = useState<string>(''); // Empty string means 'all'
+
     // ★ State for search term and debounced search term ★
     const [searchTerm, setSearchTerm] = useState<string>('');
     const [debouncedSearchTerm, setDebouncedSearchTerm] = useState<string>('');
@@ -96,19 +99,24 @@ const AdminTierPage: React.FC = () => {
         };
     }, [searchTerm]);
 
-    const fetchUsers = useCallback(async (currentPage: number, currentFilter: string, currentSearch: string) => {
+    const fetchUsers = useCallback(async (currentPage: number, currentStatusFilter: string, currentGenderFilter: string, currentSearch: string) => {
         setIsLoading(true);
         setError(null);
-        console.log(`[Admin Tier] Fetching users - Page: ${currentPage}, Status: ${currentFilter || 'all'}, Search: ${currentSearch || 'none'}`);
+        console.log(`[Admin Tier] Fetching users - Page: ${currentPage}, Status: ${currentStatusFilter || 'all'}, Gender: ${currentGenderFilter || 'all'}, Search: ${currentSearch || 'none'}`);
         
-        const params: { page: number; limit: number; status?: string; search?: string } = {
+        const params: { page: number; limit: number; status?: string; gender?: string; search?: string } = {
             page: currentPage,
             limit: 10
         };
 
-        if (currentFilter && currentFilter !== 'all') {
-            params.status = currentFilter;
+        if (currentStatusFilter && currentStatusFilter !== 'all') {
+            params.status = currentStatusFilter;
         }
+        
+        if (currentGenderFilter && currentGenderFilter !== 'all') {
+            params.gender = currentGenderFilter;
+        }
+        
         // Add search term to params if provided
         if (currentSearch) {
             params.search = currentSearch;
@@ -133,8 +141,8 @@ const AdminTierPage: React.FC = () => {
     }, [router]);
 
     useEffect(() => {
-        fetchUsers(page, statusFilter, debouncedSearchTerm);
-    }, [fetchUsers, page, statusFilter, debouncedSearchTerm]);
+        fetchUsers(page, statusFilter, genderFilter, debouncedSearchTerm);
+    }, [fetchUsers, page, statusFilter, genderFilter, debouncedSearchTerm]);
 
     const handleViewDetails = async (user: User) => {
         setSelectedUser(user);
@@ -176,7 +184,7 @@ const AdminTierPage: React.FC = () => {
             await axiosInstance.patch(`/api/admin/users/${userId}/approve`);
             console.log(`[Admin Tier] User ${userId} approved successfully.`);
             alert('User approved successfully!');
-            fetchUsers(page, statusFilter, debouncedSearchTerm);
+            fetchUsers(page, statusFilter, genderFilter, debouncedSearchTerm);
             handleCloseModal();
         } catch (err: any) {
             console.error(`[Admin Tier] Error approving user ${userId}:`, err);
@@ -202,7 +210,7 @@ const AdminTierPage: React.FC = () => {
             await axiosInstance.patch(`/api/admin/users/${userId}/reject`, { reason: rejectionReason }); 
             console.log(`[Admin Tier] User ${userId} rejected successfully.`);
             alert('사용자 가입을 거절했습니다.');
-            fetchUsers(page, statusFilter, debouncedSearchTerm);
+            fetchUsers(page, statusFilter, genderFilter, debouncedSearchTerm);
             handleCloseModal();
         } catch (err: any) {
             console.error(`[Admin Tier] Error rejecting user ${userId}:`, err);
@@ -226,7 +234,7 @@ const AdminTierPage: React.FC = () => {
             await axiosInstance.delete(`/api/admin/users/${userId}`);
             console.log(`[Admin Tier] User ${userId} permanently deleted successfully.`);
             alert('User permanently deleted successfully!');
-            fetchUsers(page, statusFilter, debouncedSearchTerm);
+            fetchUsers(page, statusFilter, genderFilter, debouncedSearchTerm);
             handleCloseModal();
         } catch (err: any) {
             console.error(`[Admin Tier] Error permanently deleting user ${userId}:`, err);
@@ -277,6 +285,13 @@ const AdminTierPage: React.FC = () => {
         setPage(1);
     };
 
+    // ★ New gender filter change handler ★
+    const handleGenderFilterChange = (newFilter: string) => {
+        console.log(`[Admin Tier] Gender filter changed to: ${newFilter}`);
+        setGenderFilter(newFilter);
+        setPage(1);
+    };
+
     return (
         <div className={styles.container}>
             <h1 className="text-3xl font-bold text-slate-100 mb-6">User Management</h1>
@@ -294,12 +309,12 @@ const AdminTierPage: React.FC = () => {
             </div>
 
             {/* ★ Filter Buttons ★ */} 
-            <div className="mb-6 flex space-x-2">
+            <div className="mb-4 flex space-x-2">
                 <button 
                     onClick={() => handleFilterChange('')} 
                     className={`${actionButtonStyle} ${statusFilter === '' ? 'bg-amber-600 text-white' : 'bg-slate-600 hover:bg-slate-500 text-slate-200'}`}
                 >
-                    All
+                    All Status
                 </button>
                 <button 
                     onClick={() => handleFilterChange('pending_approval')} 
@@ -313,13 +328,34 @@ const AdminTierPage: React.FC = () => {
                 >
                     Active
                 </button>
-                 {/* Add 'rejected' filter if needed */}
-                 {/* <button 
-                    onClick={() => handleFilterChange('rejected')} 
-                    className={`${actionButtonStyle} ${statusFilter === 'rejected' ? 'bg-amber-600 text-white' : 'bg-slate-600 hover:bg-slate-500 text-slate-200'}`}
+            </div>
+
+            {/* ★ Gender Filter Buttons ★ */}
+            <div className="mb-6 flex space-x-2">
+                <button 
+                    onClick={() => handleGenderFilterChange('')} 
+                    className={`${actionButtonStyle} ${genderFilter === '' ? 'bg-amber-600 text-white' : 'bg-slate-600 hover:bg-slate-500 text-slate-200'}`}
                 >
-                    Rejected
-                </button> */} 
+                    All Gender
+                </button>
+                <button 
+                    onClick={() => handleGenderFilterChange('male')} 
+                    className={`${actionButtonStyle} ${genderFilter === 'male' ? 'bg-amber-600 text-white' : 'bg-slate-600 hover:bg-slate-500 text-slate-200'}`}
+                >
+                    male
+                </button>
+                <button 
+                    onClick={() => handleGenderFilterChange('female')} 
+                    className={`${actionButtonStyle} ${genderFilter === 'female' ? 'bg-amber-600 text-white' : 'bg-slate-600 hover:bg-slate-500 text-slate-200'}`}
+                >
+                    female
+                </button>
+                <button 
+                    onClick={() => handleGenderFilterChange('other')} 
+                    className={`${actionButtonStyle} ${genderFilter === 'other' ? 'bg-amber-600 text-white' : 'bg-slate-600 hover:bg-slate-500 text-slate-200'}`}
+                >
+                    other
+                </button>
             </div>
 
             {isLoading && <p>Loading users...</p>}
@@ -334,6 +370,7 @@ const AdminTierPage: React.FC = () => {
                                 <tr>
                                     <th scope="col" className={tableHeaderStyle}>User</th>
                                     <th scope="col" className={tableHeaderStyle}>Email</th>
+                                    <th scope="col" className={tableHeaderStyle}>Gender</th>
                                     <th scope="col" className={tableHeaderStyle}>Status</th>
                                     <th scope="col" className={tableHeaderStyle}>Registered</th>
                                     <th scope="col" className={tableHeaderStyle}>Actions</th>
@@ -345,6 +382,7 @@ const AdminTierPage: React.FC = () => {
                                         <tr key={user.id}>
                                             <td className={tableCellStyle}>{user.name}</td>
                                             <td className={tableCellStyle}>{user.email}</td>
+                                            <td className={tableCellStyle}>{user.gender || '-'}</td>
                                             <td className={tableCellStyle}>
                                                 {/* Display status dynamically */} 
                                                 <span className={`${styles.status} ${styles[user.status]}`}>{user.status.replace('_', ' ')}</span>
@@ -365,10 +403,11 @@ const AdminTierPage: React.FC = () => {
                                     ))
                                 ) : (
                                     <tr>
-                                        <td colSpan={5} className="px-4 py-6 text-center text-slate-500">
+                                        <td colSpan={6} className="px-4 py-6 text-center text-slate-500">
                                             No users found 
                                             {debouncedSearchTerm ? ` matching "${debouncedSearchTerm}"` : ''}
-                                            {statusFilter ? ` with status: ${statusFilter.replace('_', ' ')}` : ''}.</td>
+                                            {statusFilter ? ` with status: ${statusFilter.replace('_', ' ')}` : ''}
+                                            {genderFilter ? ` and gender: ${genderFilter}` : ''}.</td>
                                     </tr>
                                 )}
                             </tbody>

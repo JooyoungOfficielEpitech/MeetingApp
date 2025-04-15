@@ -247,6 +247,7 @@ router.get('/users', async (req: Request, res: Response, next: NextFunction) => 
     const offset = (page - 1) * limit;
     const searchTerm = req.query.search as string || '';
     const statusFilter = req.query.status as string; // e.g., 'pending_approval', 'active'
+    const genderFilter = req.query.gender as string; // 성별 필터 추가
 
     const whereClause: any = {
         deletedAt: null // Always exclude soft-deleted users
@@ -260,6 +261,12 @@ router.get('/users', async (req: Request, res: Response, next: NextFunction) => 
         // Default: Fetch users who are NOT rejected
         whereClause.status = { [Op.notIn]: ['rejected'] };
         console.log(`[Admin Users] Fetching non-rejected users.`);
+    }
+
+    // Apply gender filter if provided
+    if (genderFilter && ['male', 'female', 'other'].includes(genderFilter)) {
+        whereClause.gender = genderFilter;
+        console.log(`[Admin Users] Filtering by gender: ${genderFilter}`);
     }
 
     // Apply search term if provided

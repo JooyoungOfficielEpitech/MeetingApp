@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Montserrat, Inter } from 'next/font/google'; // Import fonts
 import axiosInstance from '@/utils/axiosInstance'; // Use axiosInstance
 import io, { Socket } from 'socket.io-client'; // Import socket.io-client
+import AuthGuard from '@/components/AuthGuard';
 
 // Initialize fonts
 const montserrat = Montserrat({ subsets: ['latin'], weight: ['600', '700'] }); // Semibold/Bold weights
@@ -272,47 +273,49 @@ export default function MainPage() {
   }
 
   return (
-    <div className={`min-h-screen flex flex-col items-center justify-center bg-black text-slate-100 px-4 py-12 ${inter.className}`}>
-       {/* Profile Icon Top Right (Placeholder) */}
-       <button onClick={handleProfileClick} className="absolute top-6 right-6 text-slate-400 hover:text-amber-400">
-         <UserCircleIcon className="h-8 w-8" />
-       </button>
+    <AuthGuard requiredStatus="active">
+      <div className={`min-h-screen flex flex-col items-center justify-center bg-black text-slate-100 px-4 py-12 ${inter.className}`}>
+         {/* Profile Icon Top Right (Placeholder) */}
+         <button onClick={handleProfileClick} className="absolute top-6 right-6 text-slate-400 hover:text-amber-400">
+           <UserCircleIcon className="h-8 w-8" />
+         </button>
 
-      <div className="text-center max-w-md w-full">
-        {/* Logo or App Name */}
-        <div className="mb-12">
-           {/* Placeholder for Logo */}
-          <div className="w-24 h-24 bg-gradient-to-br from-amber-400 to-amber-600 rounded-full mx-auto flex items-center justify-center shadow-lg mb-4">
-             <span className={`text-4xl font-bold text-black ${montserrat.className}`}>N</span>
+        <div className="text-center max-w-md w-full">
+          {/* Logo or App Name */}
+          <div className="mb-12">
+             {/* Placeholder for Logo */}
+            <div className="w-24 h-24 bg-gradient-to-br from-amber-400 to-amber-600 rounded-full mx-auto flex items-center justify-center shadow-lg mb-4">
+               <span className={`text-4xl font-bold text-black ${montserrat.className}`}>N</span>
+            </div>
+            <h1 className={`text-4xl font-bold text-slate-100 ${montserrat.className}`}>App Name</h1> 
+            <p className="text-slate-400 mt-2">Find your connection.</p>
           </div>
-          <h1 className={`text-4xl font-bold text-slate-100 ${montserrat.className}`}>App Name</h1> 
-          <p className="text-slate-400 mt-2">Find your connection.</p>
-        </div>
 
-        {/* Match Button */} 
-        <div className="mb-8">
-          <button
-            onClick={buttonAction}
-            disabled={isButtonDisabled}
-            className={`w-full px-8 py-4 rounded-full text-lg font-semibold transition-all duration-300 ease-in-out shadow-lg hover:shadow-xl disabled:opacity-60 disabled:cursor-not-allowed ${isFindingMatchFemale ? 'bg-gray-600 hover:bg-gray-500 text-white' : 'bg-amber-500 hover:bg-amber-600 text-black'} focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-black focus:ring-amber-400`}
-          >
-            {isLoading ? 'Loading...' : buttonText}
-          </button>
-           {/* Keep indicator for female finding state */} 
-           {isFindingMatchFemale && (
-                 <p className="text-sm text-amber-400 mt-4 animate-pulse">Searching for match...</p>
-            )}
-            {error && <p className="text-sm text-red-400 mt-4">Error: {error}</p>} 
-        </div>
+          {/* Match Button */} 
+          <div className="mb-8">
+            <button
+              onClick={buttonAction}
+              disabled={isButtonDisabled}
+              className={`w-full px-8 py-4 rounded-full text-lg font-semibold transition-all duration-300 ease-in-out shadow-lg hover:shadow-xl disabled:opacity-60 disabled:cursor-not-allowed ${isFindingMatchFemale ? 'bg-gray-600 hover:bg-gray-500 text-white' : 'bg-amber-500 hover:bg-amber-600 text-black'} focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-black focus:ring-amber-400`}
+            >
+              {isLoading ? 'Loading...' : buttonText}
+            </button>
+             {/* Keep indicator for female finding state */} 
+             {isFindingMatchFemale && (
+                   <p className="text-sm text-amber-400 mt-4 animate-pulse">Searching for match...</p>
+              )}
+              {error && <p className="text-sm text-red-400 mt-4">Error: {error}</p>} 
+          </div>
 
-        {/* Info Text (Optional) */}
-        {/* 
-        <div className="text-slate-500 text-sm">
-          <p>현재 접속자: ... 명</p>
-          <p>예상 매칭 시간: ...</p>
-        </div>
-         */}
+          {/* Info Text (Optional) */}
+          {/* 
+          <div className="text-slate-500 text-sm">
+            <p>현재 접속자: ... 명</p>
+            <p>예상 매칭 시간: ...</p>
+          </div>
+           */}
+        </div> 
       </div> 
-    </div> 
+    </AuthGuard>
   );
 } 

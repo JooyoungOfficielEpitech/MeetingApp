@@ -63,6 +63,11 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.STRING,
       allowNull: true,
     },
+    city: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      comment: '사용자가 거주하는 도시'
+    },
     mbti: {
       type: DataTypes.STRING,
       allowNull: true,
@@ -92,7 +97,7 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: false,
       defaultValue: 'pending_approval',
       validate: {
-        isIn: [['pending_approval', 'active', 'rejected', 'suspended']]
+        isIn: [['pending_profile', 'pending_approval', 'active', 'rejected', 'suspended']]
       }
     },
     rejectionReason: {

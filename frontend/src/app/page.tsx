@@ -8,6 +8,7 @@ import { LockClosedIcon, EnvelopeIcon, ShieldCheckIcon } from '@heroicons/react/
 import { Montserrat, Inter } from 'next/font/google'; // Import fonts
 import axiosInstance from '@/utils/axiosInstance'; // axiosInstance 추가
 import axios from 'axios';
+import { useAuth } from '@/context/AuthContext';
 
 // Initialize fonts
 const montserrat = Montserrat({ subsets: ['latin'], weight: ['700', '800'] }); // Bold weights
@@ -19,6 +20,7 @@ interface LoginResponse {
     user?: {
         id: string | number;
         gender?: string;
+        status?: string; // 사용자 상태 필드 추가
     };
     redirectUrl?: string;
     message?: string;
@@ -31,66 +33,70 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  
+  // 인증 컨텍스트의 login 함수 사용
+  const { login, loading, error: authError, isAuthenticated, status, userInfo } = useAuth();
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setError(null);
-
-    // Keep the admin check if needed
-    if (email === 'root@root' && password === 'root') {
-      console.log('Admin login successful');
-      // Maybe store admin status differently
-      // sessionStorage.setItem('isAdmin', 'true');
-      alert('Redirecting to admin dashboard.');
-      router.push('/admin');
-      setIsLoading(false);
-      return;
+  // 이미 로그인된 사용자를 적절한 페이지로 리디렉션
+  useEffect(() => {
+    // 인증 상태 확인이 완료되었고, 사용자가 이미 로그인되어 있다면
+    if (!loading && isAuthenticated) {
+      console.log('이미 로그인된 사용자:', { status, userInfo });
+      
+      // root@root.com 계정은 항상 관리자 페이지로 리디렉션
+      if (userInfo && userInfo.email === 'root@root.com') {
+        console.log('루트 관리자 계정 감지: 관리자 페이지로 리디렉션');
+        router.push('/admin');
+        return;
+      }
+      
+      // 사용자 상태에 따른 리디렉션
+      switch (status) {
+        case 'pending_profile':
+          router.push('/signup/complete-profile');
+          break;
+        case 'pending_approval':
+          router.push('/auth/pending-approval');
+          break;
+        case 'active':
+          // 관리자는 관리자 페이지로, 일반 사용자는 메인 페이지로 리디렉션
+          if (userInfo && userInfo.isAdmin) {
+            router.push('/admin');
+          } else {
+            router.push('/main');
+          }
+          break;
+        case 'rejected':
+        case 'suspended':
+          router.push('/profile');
+          break;
+        default:
+          // 상태를 알 수 없는 경우는 그대로 로그인 페이지 유지
+          break;
+      }
     }
+  }, [loading, isAuthenticated, status, router, userInfo]);
 
-    console.log('Attempting general user login');
+  // 로그인 폼 제출 처리
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsLoading(true);
+    setError('');
 
     try {
-        const response = await axiosInstance.post<LoginResponse>('/api/auth/login', { email, password });
-        
-        // 응답 처리
-        console.log('Login successful');
-        setIsLoading(false);
-        
-        // 로그인 성공 시 토큰 저장
-        if (response.data.token) {
-            localStorage.setItem('token', response.data.token);
-            
-            // 사용자 ID가 있다면 저장
-            if (response.data.user?.id) {
-                localStorage.setItem('userId', response.data.user.id.toString());
-                
-                // 성별 정보가 있다면 저장
-                if (response.data.user.gender) {
-                    localStorage.setItem('userGender', response.data.user.gender);
-                }
-            }
-        }
-        
-        // 리디렉션 처리
-        if (response.data.redirectUrl) {
-            router.push(response.data.redirectUrl);
-        } else {
-            // 기본 리디렉션 경로 (원래 코드에 맞게 /main으로 변경)
-            router.push('/main');
-            alert('로그인 성공!');
-        }
-    } catch (error: any) {
-        console.error('Login failed:', error);
-        setIsLoading(false);
-        
-        if (error.response) {
-            // 서버 응답이 있는 경우
-            setError(error.response.data.message || '로그인에 실패했습니다');
-        } else {
-            // 서버 응답이 없는 경우
-            setError('로그인 중 오류가 발생했습니다. 나중에 다시 시도해주세요.');
-        }
+      console.log('로그인 시도:', { email });
+      
+      // Context의 login 함수 사용
+      await login(email, password);
+      
+      // login 함수 내부에서 리디렉션 처리하므로 여기서는 추가 코드가 필요 없음
+      console.log('로그인 성공: login 함수 내부에서 리디렉션 처리됨');
+    } catch (err: any) {
+      console.error('로그인 오류:', err);
+      // 오류 메시지 설정 (login 함수 내에서도 동일한 처리가 있지만, 여기서도 처리)
+      setError(err.response?.data?.message || '로그인에 실패했습니다.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -99,6 +105,18 @@ export default function LoginPage() {
   const labelStyle = "block text-sm font-medium text-slate-400 mb-1.5";
   const buttonBaseStyle = "w-full py-3 px-4 rounded-full font-semibold transition-colors duration-200"; // Fully rounded button
   const iconWrapperStyle = "absolute inset-0 left-0 pl-3 flex items-center pointer-events-none";
+
+  // 인증 상태 확인 중이면 로딩 표시
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center min-h-screen bg-black">
+        <div className="text-center">
+          <p className="text-xl font-semibold text-amber-400">로그인 상태 확인 중...</p>
+          <p className="text-gray-400 mt-2">잠시만 기다려주세요.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`min-h-screen bg-black text-slate-100 flex items-center justify-center py-16 px-4 sm:px-6 lg:px-8 ${inter.className}`}> {/* Apply Inter font globally */}

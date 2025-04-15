@@ -213,8 +213,6 @@ router.post('/signup',
     // Input validation rules
     body('email').isEmail().normalizeEmail().withMessage('Please enter a valid email'), // Added normalizeEmail
     body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters long'),
-    body('name').trim().notEmpty().withMessage('Name is required'), // Added trim
-    body('gender').isIn(['male', 'female', 'other']).withMessage('Invalid gender value'), // Added gender validation
     async (req: Request, res: Response, next: NextFunction): Promise<void> => {
         try {
             const errors = validationResult(req);
@@ -223,7 +221,7 @@ router.post('/signup',
                 return;
             }
 
-            const { email, password, name, gender } = req.body;
+            const { email, password } = req.body;
 
             // Check if user already exists (using Sequelize)
             const existingUser = await User.findOne({ where: { email } });
@@ -240,12 +238,8 @@ router.post('/signup',
             const newUser = await User.create({
                 email,
                 passwordHash,
-                name,
-                gender,
                 occupation: false, // Explicitly set occupation to false on signup
-                status: 'pending_approval', // Explicitly set status
-                // Add default/null values for other User model fields if necessary
-                // dob: null, age: null, etc. based on your model definition
+                status: 'pending_profile', // Set status to pending_profile for completing profile
             });
             console.log('New user created (signup):', newUser.toJSON());
 
@@ -253,7 +247,7 @@ router.post('/signup',
             const payload = { 
                 userId: newUser.id, 
                 email: newUser.email,
-                status: newUser.status // Should be 'pending_approval' from create
+                status: newUser.status // Should be 'pending_profile'
             };
             console.log('Generating JWT for new pending user with payload:', payload); 
             const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' }); // Use imported JWT_SECRET
@@ -263,15 +257,13 @@ router.post('/signup',
             const userResponse = { 
                  id: newUser.id,
                  email: newUser.email,
-                 name: newUser.name,
-                 gender: newUser.gender,
                  status: newUser.status
              };
             // ------------------------------------------------------------
 
             // Respond with success message, token, and user info
             res.status(201).json({ 
-                message: 'Signup successful. Please wait for administrator approval.', // Keep message
+                message: 'Signup successful. Please complete your profile.', // Updated message
                 token: token,       // Return the token
                 user: userResponse  // Return basic user info
             });
@@ -808,12 +800,13 @@ router.post(
         // ---------------------------------------------------
 
         // --- Validation (use body data) ---
-        const { age, height, mbti, gender } = (req as any).body;
+        const { age, height, mbti, gender, city } = (req as any).body;
         const errors: string[] = [];
         if (!age || isNaN(parseInt(age)) || parseInt(age) < 19) errors.push('Valid age (19+) is required.');
         if (!height || isNaN(parseInt(height)) || parseInt(height) < 100) errors.push('Valid height (>= 100cm) is required.');
         if (!mbti || !/^[EI][SN][TF][JP]$/i.test(mbti)) errors.push('Valid MBTI (4 letters, e.g., INFP) is required.');
         if (!gender || !['male', 'female'].includes(gender.toLowerCase())) errors.push('Valid gender (male/female) is required.');
+        if (!city || !['seoul', 'busan', 'jeju'].includes(city.toLowerCase())) errors.push('Valid city (seoul/busan/jeju) is required.');
 
         if (!files?.profilePictures || files.profilePictures.length === 0) {
             errors.push('At least one profile picture is required.');
@@ -857,6 +850,7 @@ router.post(
                 height: parseInt(height),
                 mbti: mbti.toUpperCase(),
                 gender: gender.toLowerCase(),
+                city: city.toLowerCase(), // city 필드 저장
                 profileImageUrls: profileImageUrls,
                 businessCardImageUrl: businessCardImageUrl,
                 status: 'pending_approval', 

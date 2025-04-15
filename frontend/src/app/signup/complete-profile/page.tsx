@@ -22,6 +22,7 @@ interface UserData {
     nickname?: string;
     gender?: string;
     status?: string;
+    city?: string; // 도시 필드 추가
     // Add other user fields if present in the response
 }
 
@@ -31,6 +32,7 @@ interface ProfileResponse {
         nickname?: string;
         gender?: string;
         status?: string;
+        city?: string; // 도시 필드 추가
     };
 }
 
@@ -40,14 +42,29 @@ interface CompleteSocialResponse {
         id: number | string;
         gender?: string;
         status?: string;
+        city?: string; // 도시 필드 추가
         [key: string]: any;
     };
     message?: string; // Optional error/success message
 }
 
+// 기존 사용자 업데이트 응답 인터페이스 추가
+interface ProfileUpdateResponse {
+    user?: {
+        id?: number | string;
+        nickname?: string;
+        gender?: string;
+        status?: string;
+        city?: string; // 도시 필드 추가
+        [key: string]: any;
+    };
+    message?: string;
+}
+
 interface ProfileFormData {
   nickname: string;
   gender: string;
+  city: string; // 도시 필드 추가
   age?: string;
   height?: string;
   mbti?: string;
@@ -73,6 +90,7 @@ function CompleteProfileContent() {
     const [age, setAge] = useState('');
     const [height, setHeight] = useState('');
     const [mbti, setMbti] = useState('');
+    const [city, setCity] = useState(''); // 도시 상태 추가
 
     // Add state for files and previews
     const [profilePictures, setProfilePictures] = useState<File[]>([]);
@@ -138,7 +156,8 @@ function CompleteProfileContent() {
                     id: response.data.user.id,
                     nickname: response.data.user.nickname || '',
                     gender: response.data.user.gender || '',
-                    status: response.data.user.status
+                    status: response.data.user.status,
+                    city: response.data.user.city || ''
                 });
                 setLoginChecked(true);
             } else {
@@ -299,6 +318,7 @@ function CompleteProfileContent() {
                 formData.append('age', data.age || '');
                 formData.append('height', data.height || '');
                 formData.append('mbti', (data.mbti || '').toUpperCase());
+                formData.append('city', data.city); // 도시 정보 추가
                 
                 // 프로필 사진 추가 (최대 3장)
                 profilePictures.forEach((file, index) => {
@@ -358,14 +378,22 @@ function CompleteProfileContent() {
                 }
             } else {
                 // 기존 사용자 업데이트 흐름
-                const response = await axiosInstance.put('/api/profile/me', data);
+                const response = await axiosInstance.put<ProfileUpdateResponse>('/api/profile/me', data);
                 console.log('[CompleteProfile] 프로필 업데이트 응답:', response.data);
                 
                 // 상태 업데이트
                 localStorage.setItem('userGender', data.gender);
                 
                 alert('프로필 설정이 완료되었습니다!');
-                router.replace('/main');
+                
+                // 상태 확인 후 리다이렉션
+                if (response.data && response.data.user && response.data.user.status === 'pending_approval') {
+                    console.log('[CompleteProfile] 기존 사용자 - 승인 대기 상태로 이동');
+                    router.replace('/auth/pending-approval');
+                } else {
+                    console.log('[CompleteProfile] 기존 사용자 - 메인 페이지로 이동');
+                    router.replace('/main');
+                }
             }
         } catch (error: any) {
             console.error('[CompleteProfile] 프로필 업데이트 오류:', error);
@@ -453,6 +481,27 @@ function CompleteProfileContent() {
                         </div>
                         {errors.gender && (
                             <p className="text-red-500 text-sm mt-1">{errors.gender.message}</p>
+                        )}
+                    </div>
+                    
+                    {/* 사는 도시 */}
+                    <div>
+                        <label htmlFor="city" className={labelStyle}>사는 도시</label>
+                        <div className="relative mt-1">
+                            <div className={iconWrapperStyle}><UserIcon className="h-5 w-5 text-slate-500"/></div>
+                            <select
+                                id="city"
+                                className={selectBaseStyle}
+                                {...register('city', { required: '사는 도시를 선택해주세요' })}
+                            >
+                                <option value="">도시 선택</option>
+                                <option value="seoul">서울</option>
+                                <option value="busan">부산</option>
+                                <option value="jeju">제주</option>
+                            </select>
+                        </div>
+                        {errors.city && (
+                            <p className="text-red-500 text-sm mt-1">{errors.city.message}</p>
                         )}
                     </div>
                     

@@ -3,8 +3,10 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { usePathname, useRouter } from 'next/navigation'; // Import hooks
-import { useEffect } from 'react'; // Import useEffect
+import { AuthProvider } from '@/context/AuthContext';
+import AuthGuard from '@/components/AuthGuard';
+import { useEffect } from 'react';
+import { usePathname } from 'next/navigation';
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -23,46 +25,52 @@ const geistMono = Geist_Mono({
 // };
 // ------------------------------------------------
 
-// --- Auth and Status Check Logic (Simplified) --- 
-function AuthStatusRedirect({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
-  const pathname = usePathname();
-
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    console.log(`[Layout Check] Path: ${pathname}, Token: ${!!token}`);
-
-    // Define paths accessible without login
-    const publicPaths = ['/', '/signup', '/auth/callback', '/auth/pending-approval', '/signup/complete-profile']; // Added pending-approval and complete-profile
-    const isPublicPath = publicPaths.includes(pathname);
-
-    // If user is not logged in and trying to access a non-public page, redirect to login
-    if (!token && !isPublicPath) {
-       console.log('[Layout Check] No token and not public path, redirecting to login.');
-       router.replace('/');
-    }
-
-    // Remove other complex status checks and redirects from layout
-    // Status checking will now happen primarily during login attempt
-
-  }, [pathname, router]);
-
-  return <>{children}</>;
-}
-// -----------------------------------
-
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // 현재 경로 가져오기
+  const pathname = usePathname();
+
+  // 클라이언트 측 에러 핸들링과 디버깅을 위한 useEffect 추가
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      // 페이지 리로드 시 안전하게 localStorage 접근
+      try {
+        if (typeof window !== 'undefined') {
+          const token = localStorage.getItem('token');
+          const userStatus = localStorage.getItem('user');
+          console.log('페이지 리로드: 인증 상태 확인', {
+            pathname,
+            token: !!token,
+            status: userStatus
+          });
+        }
+      } catch (e) {
+        console.error('localStorage 접근 오류:', e);
+      }
+    };
+
+    // 페이지 리로드 이벤트 리스너 추가
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    // 초기 로드 시 콘솔에 경로 정보 출력
+    console.log('레이아웃 마운트/리마운트:', { pathname });
+
+    // 컴포넌트 언마운트 시 이벤트 리스너 제거
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [pathname]);
+
   return (
     <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
-        {/* Wrap children with the auth/status checker */}
-        <AuthStatusRedirect>{children}</AuthStatusRedirect>
+      <body className={`${geistSans.variable} ${geistMono.variable}`}>
+        <AuthProvider>
+          {/* 경로가 변경될 때마다 AuthGuard 재마운트 */}
+          <AuthGuard key={pathname}>{children}</AuthGuard>
+        </AuthProvider>
       </body>
     </html>
   );

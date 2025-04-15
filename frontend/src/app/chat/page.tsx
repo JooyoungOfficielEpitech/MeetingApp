@@ -6,6 +6,7 @@ import io, { Socket } from 'socket.io-client';
 import { ArrowLeftIcon, PaperAirplaneIcon, ArrowLeftOnRectangleIcon } from '@heroicons/react/24/solid';
 import { Montserrat, Inter } from 'next/font/google';
 import axiosInstance from '@/utils/axiosInstance';
+import AuthGuard from '@/components/AuthGuard';
 
 // Initialize fonts
 const montserrat = Montserrat({ subsets: ['latin'], weight: ['600', '700'] });
@@ -341,15 +342,13 @@ function ChatContent() {
     );
 }
 
-// --- Export with Suspense wrapper for useSearchParams ---
+// --- Main Chat Page Component (renders ChatContent) --- 
 export default function ChatPage() {
-    return (
-        <Suspense fallback={
-             <div className={`flex justify-center items-center h-screen bg-gray-900 text-white ${inter.className}`}>
-                 채팅방 로딩 중...
-             </div>
-        }>
-            <ChatContent />
-        </Suspense>
-    );
+  return (
+    <AuthGuard requiredStatus="active">
+      <Suspense fallback={<div className="flex justify-center items-center min-h-screen">Loading...</div>}>
+        <ChatContent />
+      </Suspense>
+    </AuthGuard>
+  );
 } 

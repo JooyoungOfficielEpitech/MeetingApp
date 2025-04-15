@@ -29,6 +29,8 @@ interface UserProfile {
     profilePictureUrl: string | null;
     createdAt: string;
     updatedAt: string;
+    status: string | null;
+    rejectionReason: string | null;
     // Add other fields as needed
 }
 
@@ -311,6 +313,43 @@ function ProfileContent() {
         setError(null);
     };
 
+    // 거부 이유 표시 컴포넌트
+    function RejectionMessage({ reason }: { reason?: string }) {
+        if (!reason) return null;
+        
+        return (
+            <div className="mb-6 p-4 bg-red-900 bg-opacity-20 rounded-lg border border-red-700">
+                <h3 className="text-lg font-medium text-red-400 mb-2">프로필 승인이 거부되었습니다</h3>
+                <p className="text-slate-300">{reason || '관리자에 의해 프로필이 거부되었습니다. 자세한 내용은 관리자에게 문의하세요.'}</p>
+            </div>
+        );
+    }
+
+    // 정지 메시지 컴포넌트
+    function SuspensionMessage() {
+        return (
+            <div className="mb-6 p-4 bg-orange-900 bg-opacity-20 rounded-lg border border-orange-700">
+                <h3 className="text-lg font-medium text-orange-400 mb-2">계정이 정지되었습니다</h3>
+                <p className="text-slate-300">관리자에 의해 계정이 정지되었습니다. 자세한 내용은 관리자에게 문의하세요.</p>
+            </div>
+        );
+    }
+
+    // 사용자 상태 확인 로직
+    const renderStatusMessage = () => {
+        if (!userProfile) return null;
+        
+        if (userProfile.status === 'rejected') {
+            return <RejectionMessage reason={userProfile.rejectionReason || undefined} />;
+        }
+        
+        if (userProfile.status === 'suspended') {
+            return <SuspensionMessage />;
+        }
+        
+        return null;
+    };
+
     if (isLoading) {
         return (
              <div className={`min-h-screen bg-black text-slate-100 flex items-center justify-center ${inter.className}`}>
@@ -360,6 +399,9 @@ function ProfileContent() {
                          </button>
                     )}
                 </div>
+
+                {/* 상태 메시지 표시 */}
+                {renderStatusMessage()}
 
                 {isEditing ? (
                     <form onSubmit={handleSave} className="space-y-4">
