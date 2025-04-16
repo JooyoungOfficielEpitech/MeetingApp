@@ -53,6 +53,11 @@ module.exports = (sequelize, DataTypes) => {
       comment: 'Kakao User ID for social login'
     },
     name: DataTypes.STRING,
+    nickname: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      comment: '사용자의 닉네임'
+    },
     dob: DataTypes.DATEONLY,
     age: DataTypes.INTEGER,
     height: {

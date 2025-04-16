@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useState, useEffect, ChangeEvent, FormEvent, Suspense, useCallback } from 'react';
+import React, { useState, useEffect, ChangeEvent, FormEvent, Suspense, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link'; // For navigation links
-import { UserCircleIcon, CakeIcon, ArrowsUpDownIcon, TagIcon, IdentificationIcon } from '@heroicons/react/24/outline'; // Added more icons
+import { UserCircleIcon, CakeIcon, ArrowsUpDownIcon, TagIcon, IdentificationIcon, PhotoIcon, XMarkIcon } from '@heroicons/react/24/outline'; // Added more icons
 import { Montserrat, Inter } from 'next/font/google'; // Import fonts
 import axiosInstance from '@/utils/axiosInstance'; // axios 인스턴스 import 추가
+import { v4 as uuidv4 } from 'uuid';
 
 const inter = Inter({ subsets: ['latin'] });
 const montserrat = Montserrat({ subsets: ['latin'], weight: ['700', '800'] }); // Make sure font is initialized
@@ -26,12 +27,14 @@ interface UserProfile {
     address2: string | null;
     occupation: string | null;
     income: string | null;
-    profilePictureUrl: string | null;
+    profileImageUrls: string[] | null;
+    businessCardImageUrl: string | null;
     createdAt: string;
     updatedAt: string;
     status: string | null;
     rejectionReason: string | null;
-    // Add other fields as needed
+    nickname?: string;
+    city?: string;
 }
 
 // Interface for form data (subset of UserProfile, some might be string for input)
@@ -47,8 +50,22 @@ interface ProfileFormData {
     address2: string;
     occupation: string;
     income: string;
+    nickname: string;
+    city: string;
     // Email is usually not editable
+    profileImages?: File[];
 }
+
+// Helper function to rename file with UUID
+const renameFileWithUUID = (file: File): File => {
+  // 파일 확장자 추출
+  const fileExtension = file.name.split('.').pop() || '';
+  // UUID 생성 및 확장자와 결합
+  const newFileName = `${uuidv4()}.${fileExtension}`;
+  
+  // 새 파일 이름으로 파일 객체 생성 (타입, 내용 유지)
+  return new File([file], newFileName, { type: file.type });
+};
 
 // --- Inner component using hooks ---
 function ProfileContent() {
@@ -62,9 +79,13 @@ function ProfileContent() {
     const [formData, setFormData] = useState<ProfileFormData>({
         name: '', dob: '', height: '', gender: '', mbti: '',
         weight: '', phone: '', address1: '', address2: '',
-        occupation: '', income: ''
+        occupation: '', income: '', nickname: '', city: ''
     });
     const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+    const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
+    const [uploadedProfileImages, setUploadedProfileImages] = useState<File[]>([]);
+    const [profileImagePreviews, setProfileImagePreviews] = useState<string[]>([]);
+    const profileInputRef = useRef<HTMLInputElement>(null);
 
     // --- Wrap fetchUserProfile in useCallback ---
     const fetchUserProfile = useCallback(async (token: string | null) => {
@@ -91,6 +112,7 @@ function ProfileContent() {
 
             const userData: UserProfile = response.data;
             setUserProfile(userData);
+            console.log('[Profile Page] Received user data:', JSON.stringify(userData)); // 데이터 로깅 추가
 
             if (userData && userData.id) {
                 localStorage.setItem('userId', userData.id.toString());
@@ -106,8 +128,19 @@ function ProfileContent() {
                 return;
             }
 
+            // ★ 첫 번째 프로필 이미지 URL 상태 설정
+            if (userData.profileImageUrls && Array.isArray(userData.profileImageUrls) && userData.profileImageUrls.length > 0) {
+                 console.log('[Profile Page] Setting profile image URL:', userData.profileImageUrls[0]);
+                 setProfileImageUrl(userData.profileImageUrls[0]);
+             } else {
+                 console.log('[Profile Page] No profile image URLs found or array is empty.');
+                 setProfileImageUrl(null); // 이미지가 없으면 null 설정
+             }
+
             setFormData({
                 name: userData.name || '',
+                nickname: userData.nickname || '',
+                city: userData.city || '',
                 dob: userData.dob ? userData.dob.split('T')[0] : '',
                 height: userData.height?.toString() || '',
                 gender: userData.gender || '',
@@ -119,6 +152,10 @@ function ProfileContent() {
                 occupation: userData.occupation || '',
                 income: userData.income || '',
             });
+
+            if (userData.profileImageUrls && Array.isArray(userData.profileImageUrls)) {
+                setProfileImagePreviews(userData.profileImageUrls);
+            }
 
             if (!userData.gender) {
                 console.log("Profile incomplete (gender missing), entering edit mode.");
@@ -229,6 +266,53 @@ function ProfileContent() {
         setFormData(prev => ({ ...prev, [name]: value }));
     };
 
+    // Handle profile image upload
+    const handleProfileImageUpload = (e: ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files) {
+            const newFiles = Array.from(e.target.files);
+            
+            // 기존 파일과 합쳐서 최대 3개까지만 허용
+            const combinedFiles = [...uploadedProfileImages, ...newFiles];
+            if (combinedFiles.length > 3) {
+                alert('프로필 사진은 최대 3장까지 업로드할 수 있습니다.');
+                return;
+            }
+            
+            // 파일 이름 UUID로 변경
+            const renamedFiles = newFiles.map(file => renameFileWithUUID(file));
+            const updatedFiles = [...uploadedProfileImages, ...renamedFiles];
+            setUploadedProfileImages(updatedFiles);
+            
+            // 미리보기 URL 생성
+            // 기존 미리보기 URL은 유지하고 새 이미지에 대한 미리보기만 추가
+            const newPreviewUrls = newFiles.map(file => URL.createObjectURL(file));
+            setProfileImagePreviews([...profileImagePreviews, ...newPreviewUrls]);
+            
+            // 입력 필드 초기화
+            if (e.target.value) {
+                e.target.value = '';
+            }
+        }
+    };
+
+    // Handle profile image removal
+    const handleRemoveProfileImage = (index: number) => {
+        // 미리보기 URL이 blob URL인 경우에만 해제
+        if (profileImagePreviews[index]?.startsWith('blob:')) {
+            URL.revokeObjectURL(profileImagePreviews[index]);
+        }
+        
+        const updatedPreviews = [...profileImagePreviews];
+        updatedPreviews.splice(index, 1);
+        setProfileImagePreviews(updatedPreviews);
+        
+        const updatedFiles = [...uploadedProfileImages];
+        if (index < updatedFiles.length) {
+            updatedFiles.splice(index, 1);
+            setUploadedProfileImages(updatedFiles);
+        }
+    };
+
     // Handle saving profile changes
     const handleSave = async (e: FormEvent) => {
         e.preventDefault();
@@ -236,30 +320,45 @@ function ProfileContent() {
         setIsSaving(true);
         setError(null);
 
-        // Convert string values to appropriate types before saving
-        const dataToSend = {
-            name: formData.name,
-            dob: formData.dob || null,
-            height: formData.height ? parseInt(formData.height) : null,
-            gender: formData.gender || null,
-            mbti: formData.mbti || null,
-            weight: formData.weight ? parseInt(formData.weight) : null,
-            phone: formData.phone || null,
-            address1: formData.address1 || null,
-            address2: formData.address2 || null,
-            occupation: formData.occupation || null,
-            income: formData.income || null,
-        };
+        // FormData 객체 생성하여 이미지와 기본 정보 함께 전송
+        const formDataToSend = new FormData();
+        
+        // 기본 프로필 정보 추가
+        formDataToSend.append('name', formData.name);
+        formDataToSend.append('nickname', formData.nickname || '');
+        formDataToSend.append('city', formData.city || '');
+        
+        if (formData.dob) formDataToSend.append('dob', formData.dob);
+        if (formData.height) formDataToSend.append('height', formData.height);
+        if (formData.gender) formDataToSend.append('gender', formData.gender);
+        if (formData.mbti) formDataToSend.append('mbti', formData.mbti);
+        if (formData.weight) formDataToSend.append('weight', formData.weight);
+        if (formData.phone) formDataToSend.append('phone', formData.phone);
+        if (formData.address1) formDataToSend.append('address1', formData.address1);
+        if (formData.address2) formDataToSend.append('address2', formData.address2);
+        if (formData.occupation) formDataToSend.append('occupation', formData.occupation);
+        if (formData.income) formDataToSend.append('income', formData.income);
+        
+        // 새로 업로드한 프로필 이미지가 있는 경우 추가
+        if (uploadedProfileImages.length > 0) {
+            uploadedProfileImages.forEach(file => {
+                formDataToSend.append('profilePictures', file);
+            });
+        }
 
         try {
-            const response = await axiosInstance.put('/api/profile/me', dataToSend);
+            const response = await axiosInstance.post('/api/profile/complete-regular', formDataToSend, {
+                headers: {
+                    'Content-Type': 'multipart/form-data'
+                }
+            });
 
             if (response.status === 200) {
                 // 프로필 업데이트 성공
-                const updatedUserData = response.data as UserProfile;
+                const updatedUserData = (response.data as any).user || response.data as UserProfile;
                 setUserProfile(updatedUserData);
                 setIsEditing(false);
-
+                
                 // 각 필드에 맞게 폼 데이터 업데이트
                 setFormData({
                     name: updatedUserData.name || '',
@@ -273,7 +372,17 @@ function ProfileContent() {
                     address2: updatedUserData.address2 || '',
                     occupation: updatedUserData.occupation || '',
                     income: updatedUserData.income || '',
+                    nickname: updatedUserData.nickname || '',
+                    city: updatedUserData.city || '',
                 });
+                
+                // 업로드 상태 초기화
+                setUploadedProfileImages([]);
+                
+                // 새 프로필 이미지 URL로 미리보기 업데이트
+                if (updatedUserData.profileImageUrls && Array.isArray(updatedUserData.profileImageUrls)) {
+                    setProfileImagePreviews(updatedUserData.profileImageUrls);
+                }
 
                 alert('프로필이 성공적으로 업데이트되었습니다.');
             } else if (response.status === 401 || response.status === 403) {
@@ -307,7 +416,7 @@ function ProfileContent() {
                 mbti: userProfile.mbti || '', weight: userProfile.weight?.toString() || '',
                 phone: userProfile.phone || '', address1: userProfile.address1 || '',
                 address2: userProfile.address2 || '', occupation: userProfile.occupation || '',
-                income: userProfile.income || ''
+                income: userProfile.income || '', nickname: userProfile.nickname || '', city: userProfile.city || ''
             });
         }
         setError(null);
@@ -349,6 +458,18 @@ function ProfileContent() {
         
         return null;
     };
+
+    // 컴포넌트 언마운트 시 미리보기 URL 정리
+    useEffect(() => {
+        return () => {
+            // 로컬 blob URL만 해제
+            profileImagePreviews.forEach(url => {
+                if (url.startsWith('blob:')) {
+                    URL.revokeObjectURL(url);
+                }
+            });
+        };
+    }, [profileImagePreviews]);
 
     if (isLoading) {
         return (
@@ -402,6 +523,55 @@ function ProfileContent() {
 
                 {/* 상태 메시지 표시 */}
                 {renderStatusMessage()}
+
+                {/* 프로필 이미지 표시 (3개 이미지) */}
+                <div className="mb-8">
+                    <h2 className="text-xl font-semibold text-amber-400 mb-3">프로필 이미지</h2>
+                    <div className="flex flex-col items-center">
+                        {/* 메인 이미지 (크게) */}
+                        <div className="w-48 h-48 rounded-xl bg-gray-700 border-4 border-amber-500 flex items-center justify-center overflow-hidden mb-4">
+                            {userProfile?.profileImageUrls && userProfile.profileImageUrls.length > 0 ? (
+                                <img 
+                                    src={userProfile.profileImageUrls[0]} 
+                                    alt="Main Profile" 
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => (e.currentTarget.src = '/default-avatar.png')}
+                                />
+                            ) : (
+                                <UserCircleIcon className="h-32 w-32 text-slate-500" />
+                            )}
+                        </div>
+                        
+                        {/* 보조 이미지들 (작게) */}
+                        <div className="flex space-x-4">
+                            {userProfile?.profileImageUrls && userProfile.profileImageUrls.length > 1 ? (
+                                <>
+                                    <div className="w-24 h-24 rounded-lg bg-gray-700 border-2 border-amber-400 flex items-center justify-center overflow-hidden">
+                                        <img 
+                                            src={userProfile.profileImageUrls[1]} 
+                                            alt="Profile 2" 
+                                            className="w-full h-full object-cover"
+                                            onError={(e) => (e.currentTarget.src = '/default-avatar.png')}
+                                        />
+                                    </div>
+                                    
+                                    {userProfile.profileImageUrls.length > 2 && (
+                                        <div className="w-24 h-24 rounded-lg bg-gray-700 border-2 border-amber-400 flex items-center justify-center overflow-hidden">
+                                            <img 
+                                                src={userProfile.profileImageUrls[2]} 
+                                                alt="Profile 3" 
+                                                className="w-full h-full object-cover"
+                                                onError={(e) => (e.currentTarget.src = '/default-avatar.png')}
+                                            />
+                                        </div>
+                                    )}
+                                </>
+                            ) : (
+                                <div className="text-slate-400 text-sm">추가 프로필 이미지가 없습니다</div>
+                            )}
+                        </div>
+                    </div>
+                </div>
 
                 {isEditing ? (
                     <form onSubmit={handleSave} className="space-y-4">
@@ -487,12 +657,94 @@ function ProfileContent() {
                                 <input id="income" name="income" type="text" value={formData.income} onChange={handleChange} className={inputBaseStyle} placeholder="Income"/>
                             </div>
                         </div>
+                        <div>
+                            <label htmlFor="nickname" className={labelStyle}>Nickname</label>
+                            <div className="relative mt-1">
+                                <div className={iconWrapperStyle}><UserCircleIcon className="h-5 w-5 text-slate-500"/></div>
+                                <input id="nickname" name="nickname" type="text" required value={formData.nickname || ''} onChange={handleChange} className={inputBaseStyle} placeholder="Nickname"/>
+                            </div>
+                        </div>
+                        <div>
+                            <label htmlFor="city" className={labelStyle}>City</label>
+                            <div className="relative mt-1">
+                                <div className={iconWrapperStyle}><IdentificationIcon className="h-5 w-5 text-slate-500"/></div>
+                                <select id="city" name="city" value={formData.city || ''} onChange={handleChange} className={selectBaseStyle}>
+                                    <option value="" disabled>Select City</option>
+                                    <option value="seoul">Seoul</option>
+                                    <option value="busan">Busan</option>
+                                    <option value="jeju">Jeju</option>
+                                </select>
+                            </div>
+                        </div>
 
                         {error && (
                              <div className="text-red-400 text-sm text-center p-2 bg-red-900 bg-opacity-40 rounded-md">
                                 {error}
                              </div>
                         )}
+
+                        <div className="mt-8">
+                            <label htmlFor="profile-images" className="block text-lg font-medium text-amber-400 mb-3">프로필 사진 (최대 3장)</label>
+                            <div className="grid grid-cols-3 gap-4 mb-4">
+                                {profileImagePreviews.map((preview, index) => (
+                                    <div key={index} className="relative rounded-lg overflow-hidden h-32 bg-gray-700">
+                                        <img 
+                                            src={preview} 
+                                            alt={`프로필 ${index+1}`} 
+                                            className="w-full h-full object-cover"
+                                            onError={(e) => (e.currentTarget.src = '/default-avatar.png')}
+                                        />
+                                        <button 
+                                            type="button"
+                                            onClick={() => handleRemoveProfileImage(index)}
+                                            className="absolute top-2 right-2 bg-red-600 rounded-full p-1 text-white hover:bg-red-700"
+                                        >
+                                            <XMarkIcon className="h-5 w-5" />
+                                        </button>
+                                        {index === 0 && (
+                                            <div className="absolute bottom-0 left-0 right-0 bg-amber-600 text-white text-xs text-center py-1">
+                                                메인 사진
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                                
+                                {/* 빈 슬롯 표시 */}
+                                {Array.from({ length: Math.max(0, 3 - profileImagePreviews.length) }).map((_, index) => (
+                                    <div key={`empty-${index}`} className="h-32 rounded-lg border-2 border-dashed border-gray-500 flex items-center justify-center bg-gray-800">
+                                        <div className="text-gray-400 text-center">
+                                            <PhotoIcon className="h-8 w-8 mx-auto mb-1" />
+                                            <span className="text-xs">비어있음</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                            
+                            <input
+                                ref={profileInputRef}
+                                id="profile-images"
+                                type="file"
+                                accept="image/*"
+                                multiple
+                                className="sr-only" // 화면에 보이지 않게
+                                onChange={handleProfileImageUpload}
+                            />
+                            
+                            <button
+                                type="button"
+                                onClick={() => profileInputRef.current?.click()}
+                                className="mt-2 py-2 px-4 bg-gray-700 rounded-md text-white hover:bg-gray-600 flex items-center justify-center w-full"
+                                disabled={profileImagePreviews.length >= 3}
+                            >
+                                <PhotoIcon className="h-5 w-5 mr-2" />
+                                {profileImagePreviews.length === 0 ? '프로필 사진 추가' : '사진 추가하기'} 
+                                {profileImagePreviews.length >= 3 && ' (최대 3장)'}
+                            </button>
+                            
+                            <p className="text-sm text-gray-400 mt-2">
+                                * 첫 번째 사진이 메인 프로필 사진으로 사용됩니다.
+                            </p>
+                        </div>
 
                         <div className="flex justify-end mt-8 space-x-3">
                             <button
@@ -513,31 +765,69 @@ function ProfileContent() {
                         </div>
                     </form>
                 ) : (
-                    <>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div><span className={labelStyle}>Name</span><p className={valueStyle}>{userProfile?.name}</p></div>
-                            <div><span className={labelStyle}>Email</span><p className={valueStyle}>{userProfile?.email}</p></div>
-                            <div><span className={labelStyle}>Age</span><p className={valueStyle}>{userProfile?.age ?? '-'}</p></div>
-                            <div><span className={labelStyle}>Height</span><p className={valueStyle}>{userProfile?.height ? `${userProfile.height} cm` : '-'}</p></div>
-                            <div><span className={labelStyle}>Gender</span><p className={valueStyle}>{userProfile?.gender ?? '-'}</p></div>
-                            <div><span className={labelStyle}>MBTI</span><p className={valueStyle}>{userProfile?.mbti ?? '-'}</p></div>
-                            <div><span className={labelStyle}>Date of Birth</span><p className={valueStyle}>{userProfile?.dob ?? '-'}</p></div>
-                            <div><span className={labelStyle}>Weight</span><p className={valueStyle}>{userProfile?.weight ? `${userProfile.weight} kg` : '-'}</p></div>
-                            <div><span className={labelStyle}>Phone</span><p className={valueStyle}>{userProfile?.phone ?? '-'}</p></div>
-                            <div><span className={labelStyle}>Address Line 1</span><p className={valueStyle}>{userProfile?.address1 ?? '-'}</p></div>
-                            <div><span className={labelStyle}>Address Line 2</span><p className={valueStyle}>{userProfile?.address2 ?? '-'}</p></div>
-                            <div><span className={labelStyle}>Occupation</span><p className={valueStyle}>{userProfile?.occupation ?? '-'}</p></div>
-                            <div><span className={labelStyle}>Income</span><p className={valueStyle}>{userProfile?.income ?? '-'}</p></div>
+                    <div className="space-y-6">
+                        {/* 중요 정보 세션 - 요청에 따른 강조 정보들 */}
+                        <div className="p-4 bg-gray-900 rounded-xl">
+                            <h2 className="text-xl font-semibold text-amber-400 mb-3">기본 정보</h2>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="bg-gray-800 p-3 rounded-lg">
+                                    <span className={`${labelStyle} text-amber-300`}>아이디</span>
+                                    <p className={`${valueStyle} text-xl`}>#{userProfile?.id ?? '-'}</p>
+                                </div>
+                                <div className="bg-gray-800 p-3 rounded-lg">
+                                    <span className={`${labelStyle} text-amber-300`}>이메일</span>
+                                    <p className={`${valueStyle} text-xl`}>{userProfile?.email ?? '-'}</p>
+                                </div>
+                                <div className="bg-gray-800 p-3 rounded-lg">
+                                    <span className={`${labelStyle} text-amber-300`}>성별</span>
+                                    <p className={`${valueStyle} text-xl`}>{userProfile?.gender === 'male' ? '남성' : userProfile?.gender === 'female' ? '여성' : '-'}</p>
+                                </div>
+                                <div className="bg-gray-800 p-3 rounded-lg">
+                                    <span className={`${labelStyle} text-amber-300`}>사는 곳</span>
+                                    <p className={`${valueStyle} text-xl`}>{
+                                        userProfile?.city === 'seoul' ? '서울' : 
+                                        userProfile?.city === 'busan' ? '부산' : 
+                                        userProfile?.city === 'jeju' ? '제주' : '-'
+                                    }</p>
+                                </div>
+                            </div>
                         </div>
-                        <div className="mt-8 text-right">
+                        
+                        {/* 추가 정보 섹션 */}
+                        <div className="p-4 bg-gray-900 rounded-xl">
+                            <h2 className="text-xl font-semibold text-amber-400 mb-3">추가 정보</h2>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div><span className={labelStyle}>이름</span><p className={valueStyle}>{userProfile?.name ?? '-'}</p></div>
+                                <div><span className={labelStyle}>닉네임</span><p className={valueStyle}>{userProfile?.nickname ?? '-'}</p></div>
+                                <div><span className={labelStyle}>나이</span><p className={valueStyle}>{userProfile?.age ?? '-'}</p></div>
+                                <div><span className={labelStyle}>키</span><p className={valueStyle}>{userProfile?.height ? `${userProfile.height} cm` : '-'}</p></div>
+                                <div><span className={labelStyle}>MBTI</span><p className={valueStyle}>{userProfile?.mbti ?? '-'}</p></div>
+                                <div><span className={labelStyle}>생일</span><p className={valueStyle}>{userProfile?.dob ? new Date(userProfile.dob).toLocaleDateString() : '-'}</p></div>
+                                <div><span className={labelStyle}>몸무게</span><p className={valueStyle}>{userProfile?.weight ? `${userProfile.weight} kg` : '-'}</p></div>
+                                <div><span className={labelStyle}>전화번호</span><p className={valueStyle}>{userProfile?.phone ?? '-'}</p></div>
+                                <div><span className={labelStyle}>주소 1</span><p className={valueStyle}>{userProfile?.address1 ?? '-'}</p></div>
+                                <div><span className={labelStyle}>주소 2</span><p className={valueStyle}>{userProfile?.address2 ?? '-'}</p></div>
+                                <div><span className={labelStyle}>직업</span><p className={valueStyle}>{userProfile?.occupation ?? '-'}</p></div>
+                                <div><span className={labelStyle}>수입</span><p className={valueStyle}>{userProfile?.income ?? '-'}</p></div>
+                            </div>
+                        </div>
+                        
+                        <div className="border-t border-slate-700 pt-6 flex flex-col sm:flex-row justify-between items-center space-y-4 sm:space-y-0">
                             <button 
-                                onClick={() => { setIsEditing(true); setError(null); }}
-                                className={`${buttonBaseStyle} bg-amber-500 hover:bg-amber-600 text-slate-900 ${montserrat.className} font-semibold`}
-                             >
-                                Edit Profile
+                                onClick={() => setIsEditing(true)}
+                                className={`${buttonBaseStyle} bg-amber-500 hover:bg-amber-600 text-slate-900 w-full sm:w-auto`}
+                            >
+                                프로필 수정하기
+                            </button>
+                            <button 
+                                onClick={handleDeleteAccount}
+                                className={`${buttonBaseStyle} bg-red-800 hover:bg-red-700 text-slate-200 text-sm w-full sm:w-auto`}
+                                disabled={isSaving}
+                            >
+                                {isSaving ? '삭제 중...' : '계정 삭제하기'}
                             </button>
                         </div>
-                    </>
+                    </div>
                 )}
             </div>
             
@@ -545,27 +835,6 @@ function ProfileContent() {
                 <Link href="/main" className="text-sm text-amber-400 hover:text-amber-300">
                     &larr; Back to Main
                 </Link>
-            </div>
-
-            {/* Logout and Delete Buttons - Always visible below the form/view */}
-            <div className="mt-8 pt-6 border-t border-slate-700 flex flex-col sm:flex-row justify-between items-center space-y-4 sm:space-y-0">
-                {/* Logout Button */}
-                <button
-                    onClick={handleLogout}
-                    className={`w-full sm:w-auto px-6 py-2 rounded-full text-sm font-medium border border-slate-600 text-slate-300 hover:bg-slate-700 transition-colors ${inter.className}`}
-                    disabled={isSaving} // Disable if saving/deleting
-                >
-                    Logout
-                </button>
-
-                {/* Delete Account Button */}
-                <button
-                    onClick={handleDeleteAccount}
-                    className={`w-full sm:w-auto px-6 py-2 rounded-full text-sm font-medium border border-red-700 text-red-400 hover:bg-red-900 hover:text-red-300 transition-colors ${inter.className} ${isSaving ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    disabled={isSaving} // Disable if saving/deleting
-                >
-                    Delete Account
-                </button>
             </div>
         </div>
     );

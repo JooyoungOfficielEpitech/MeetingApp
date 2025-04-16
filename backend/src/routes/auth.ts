@@ -6,6 +6,8 @@ import { Op } from 'sequelize'; // Import Op for OR query
 import multer, { FileFilterCallback } from 'multer'; // Import multer and FileFilterCallback
 import path from 'path';     // Import path
 import fs from 'fs';         // Import fs
+import { v4 as uuidv4 } from 'uuid'; // UUID 생성
+import supabaseAdmin from '../utils/supabaseClient'; // Supabase 클라이언트 가져오기
 // --- Augment Express Session Type --- 
 import 'express-session';
 
@@ -77,73 +79,25 @@ router.get('/session/profile-data', (req: any, res: Response) => {
 // const users: User[] = [];
 // ------------------------------------
 
-// --- Multer Configuration for File Uploads ---
+// --- Multer Configuration for File Uploads (메모리 저장소로 변경) ---
 
-// Ensure upload directories exist (create if they don't)
-// Adjust the path relative to the current file (routes/auth.ts)
-const uploadsBaseDir = path.join(__dirname, '..', '..', 'uploads'); // Base uploads directory
-const profileUploadDir = path.join(uploadsBaseDir, 'profiles');
-const cardUploadDir = path.join(uploadsBaseDir, 'business_cards');
-fs.mkdirSync(profileUploadDir, { recursive: true });
-fs.mkdirSync(cardUploadDir, { recursive: true });
-console.log(`[Multer] Ensured upload directories exist: ${profileUploadDir} and ${cardUploadDir}`);
+// Multer 메모리 저장소 설정 (디스크 대신 메모리에 임시 저장)
+const storage = multer.memoryStorage();
 
-// Define types for multer callbacks for clarity
-type DestinationCallback = (error: Error | null, destination: string) => void;
-type FileNameCallback = (error: Error | null, filename: string) => void;
-
-// Multer disk storage configuration
-const storage = multer.diskStorage({
-    destination: (req: Request, file: Express.Multer.File, cb: DestinationCallback) => {
-        let uploadPath = '';
-        if (file.fieldname === 'profilePictures') {
-            uploadPath = profileUploadDir;
-        } else if (file.fieldname === 'businessCard') {
-            uploadPath = cardUploadDir;
-        } else {
-             return cb(new Error('Invalid field name for file upload'), '');
-        }
-         // Check if directory exists before calling cb
-         if (!fs.existsSync(uploadPath)) {
-             try {
-                 fs.mkdirSync(uploadPath, { recursive: true });
-             } catch (mkdirErr) {
-                 console.error(`[Multer] Error creating directory ${uploadPath}:`, mkdirErr);
-                 return cb(mkdirErr instanceof Error ? mkdirErr : new Error('Failed to create upload directory'), '');
-             }
-         }
-        cb(null, uploadPath);
-    },
-    filename: (req: any, file: Express.Multer.File, cb: FileNameCallback) => {
-        // Use identifier from session instead of req.user.userId
-        // Ensure session middleware runs before multer for this route
-        const identifier = req.session?.pendingSocialProfile?.id || req.session?.pendingSocialProfile?.email || 'unknown-social-user';
-        const safeIdentifier = String(identifier).replace(/[^a-zA-Z0-9_\-]/g, '_'); // Sanitize identifier
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        const extension = path.extname(file.originalname);
-        // Include fieldname for clarity
-        const filename = `${safeIdentifier}-${file.fieldname}-${uniqueSuffix}${extension}`;
-        console.log(`[Multer] Generating filename: ${filename} for social user: ${identifier}`);
-        cb(null, filename);
-    }
-});
-
-// File filter to accept only images
+// 파일 필터 (이미지 파일만 허용)
 const fileFilter = (req: Request, file: Express.Multer.File, cb: FileFilterCallback) => {
     if (file.mimetype.startsWith('image/')) {
         console.log(`[Multer] Accepting image file: ${file.originalname} (${file.mimetype})`);
-        cb(null, true); // Accept file
+        cb(null, true);
     } else {
          console.warn(`[Multer] Rejecting non-image file: ${file.originalname} (${file.mimetype})`);
-         // Reject file - pass an error message (optional)
-        cb(new Error('Invalid file type, only images (JPEG, PNG, GIF) are allowed!'));
-        // Or just reject without error: cb(null, false);
+         cb(new Error('Invalid file type, only images (JPEG, PNG, GIF) are allowed!'));
     }
 };
 
-// Multer upload instance configuration
+// Multer 업로드 인스턴스 (메모리 저장소 사용)
 const upload = multer({
-    storage: storage,
+    storage: storage, // 메모리 저장소 사용
     fileFilter: fileFilter,
     limits: {
         fileSize: 10 * 1024 * 1024, // 10MB limit per file
@@ -748,66 +702,45 @@ const completeSocialProfileHandler: RequestHandler = async (req: Request, res: R
  */
 router.post(
     '/complete-social',
-    // Middleware to check if session exists before multer tries to access it
-    (req: Request, res: Response, next: NextFunction) => { // Use standard Request type
+    // Middleware to check if session exists
+    (req: Request, res: Response, next: NextFunction) => {
         if (!req.session || !req.session.pendingSocialProfile) {
              console.error('[complete-social Pre-Multer Check] Error: Session or pendingSocialProfile missing.');
              res.status(401).json({ message: 'Session expired or invalid. Please try social login again.' });
-             return; // ★ Add explicit return here
+             return;
          }
         console.log(`[complete-social Pre-Multer Check] Session found for social profile completion.`);
-        next(); // Proceed to multer
+        next();
     },
-    upload.fields([ // Apply multer AFTER session check
+    upload.fields([ // Apply multer
         { name: 'profilePictures', maxCount: 3 },
         { name: 'businessCard', maxCount: 1 }
     ]),
-    // Cast req to reuse AuthenticatedRequest type for file structure, but user field won't exist
-    async (req: Request, res: Response, next: NextFunction): Promise<void> => { // Use standard Request type
-        // const socialReq = req as AuthenticatedRequest; // Remove cast
-        const files = (req as any).files as { // Use type assertion for files
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+        const files = (req as any).files as { 
             profilePictures?: Express.Multer.File[];
             businessCard?: Express.Multer.File[];
-        }; 
-        
-        // --- Get data from SESSION, not req.user ---
+        };
         const pendingProfile = req.session?.pendingSocialProfile;
-        if (!pendingProfile || !pendingProfile.id || !pendingProfile.email) { // Check essential session data
+
+        if (!pendingProfile || !pendingProfile.id || !pendingProfile.email) {
              console.error('[complete-social Handler] Error: Session or essential pending profile data missing after multer.');
-             // Clean up any files multer might have saved
-             // cleanupFiles(); // Define or call cleanup logic if needed
              res.status(401).json({ message: 'Session expired or invalid after file upload. Please try social login again.' });
              return;
         }
-        const { id: googleId, email: sessionEmail, name: sessionName, provider } = pendingProfile;
-        console.log(`[POST /api/auth/complete-social] Processing request for social user: ${sessionEmail} (Google ID: ${googleId})`);
-        // ----------------------------------------------
+        const { id: socialId, email: sessionEmail, name: sessionName, provider } = pendingProfile;
+        console.log(`[POST /api/auth/complete-social] Processing request for social user: ${sessionEmail} (${provider} ID: ${socialId})`);
 
-        // --- Define cleanup function locally or import it ---
-        const cleanupFiles = () => {
-            console.warn(`[complete-social] Cleaning up uploaded files for failed request (Social User: ${sessionEmail}).`);
-             if (files?.profilePictures) {
-                 files.profilePictures.forEach(f => {
-                     try { fs.unlinkSync(f.path); console.log(`Deleted: ${f.path}`); } catch (e) { console.error(`Error deleting ${f.path}:`, e); }
-                 });
-             }
-             if (files?.businessCard) {
-                 files.businessCard.forEach(f => {
-                     try { fs.unlinkSync(f.path); console.log(`Deleted: ${f.path}`); } catch (e) { console.error(`Error deleting ${f.path}:`, e); }
-                 });
-             }
-        };
-        // ---------------------------------------------------
-
-        // --- Validation (use body data) ---
-        const { age, height, mbti, gender, city } = (req as any).body;
+        // --- Validation ---
+        const { age, height, mbti, gender, city, nickname } = (req as any).body;
         const errors: string[] = [];
+        if (!nickname || nickname.trim() === '') errors.push('Nickname is required.');
         if (!age || isNaN(parseInt(age)) || parseInt(age) < 19) errors.push('Valid age (19+) is required.');
         if (!height || isNaN(parseInt(height)) || parseInt(height) < 100) errors.push('Valid height (>= 100cm) is required.');
         if (!mbti || !/^[EI][SN][TF][JP]$/i.test(mbti)) errors.push('Valid MBTI (4 letters, e.g., INFP) is required.');
         if (!gender || !['male', 'female'].includes(gender.toLowerCase())) errors.push('Valid gender (male/female) is required.');
         if (!city || !['seoul', 'busan', 'jeju'].includes(city.toLowerCase())) errors.push('Valid city (seoul/busan/jeju) is required.');
-
+        
         if (!files?.profilePictures || files.profilePictures.length === 0) {
             errors.push('At least one profile picture is required.');
         } else if (files.profilePictures.length > 3) {
@@ -821,48 +754,108 @@ router.post(
 
         if (errors.length > 0) {
              console.warn(`[complete-social] Validation failed for social user ${sessionEmail}:`, errors);
-             cleanupFiles();
              res.status(400).json({ message: 'Validation failed', errors });
              return;
         }
         // --- End Validation ---
 
-        try {
-            // Prepare file paths
-            if (!files || !files.profilePictures || files.profilePictures.length === 0 || !files.businessCard || files.businessCard.length === 0) {
-                 console.error('[complete-social] Internal Server Error: File objects missing after validation.');
-                 cleanupFiles();
-                 res.status(500).json({ message: 'Internal server error processing uploaded files.' });
-                 return;
-            }
-            const profileImageUrls = files.profilePictures.map(file =>
-                `/uploads/profiles/${path.basename(file.path)}`
-            );
-            const businessCardImageUrl = `/uploads/business_cards/${path.basename(files.businessCard[0].path)}`;
+        // ----- Supabase Upload Logic ----- 
+        let uploadedProfileUrls: string[] = [];
+        let uploadedBusinessCardUrl: string | null = null;
+        const userIdForPath = socialId.toString(); // Use social ID for path initially
+        const profileImageFolder = `profiles/${userIdForPath}`;
+        const businessCardFolder = `business_cards/${userIdForPath}`;
 
-            // --- Create NEW user record (using sessionEmail which might be nickname) --- 
+        try {
+            // Check required files again before proceeding
+            if (!files || !files.profilePictures || files.profilePictures.length === 0 || !files.businessCard || files.businessCard.length === 0) {
+                throw new Error('File objects missing after validation.');
+            }
+
+            // Upload Profile Pictures
+            for (const file of files.profilePictures) {
+                const fileName = `${uuidv4()}-${file.originalname}`;
+                const filePath = `${profileImageFolder}/${fileName}`;
+                console.log(`[Supabase Upload] Uploading profile picture: ${filePath}`);
+                const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
+                    .from('profile-images') // 버킷 이름
+                    .upload(filePath, file.buffer, { // 메모리 버퍼 사용
+                        contentType: file.mimetype,
+                        upsert: false, // 동일 파일명 덮어쓰기 방지
+                    });
+
+                if (uploadError) {
+                    console.error(`[Supabase Upload] Error uploading profile picture ${fileName}:`, uploadError);
+                    throw new Error(`Failed to upload profile picture: ${uploadError.message}`);
+                }
+                
+                // Get public URL
+                const { data: urlData } = supabaseAdmin.storage
+                    .from('profile-images')
+                    .getPublicUrl(filePath);
+                    
+                if (!urlData || !urlData.publicUrl) {
+                     console.error(`[Supabase Upload] Failed to get public URL for ${filePath}`);
+                     throw new Error(`Failed to get public URL for profile picture.`);
+                }
+                uploadedProfileUrls.push(urlData.publicUrl);
+                console.log(`[Supabase Upload] Profile picture uploaded: ${urlData.publicUrl}`);
+            }
+
+            // Upload Business Card
+            const businessCardFile = files.businessCard[0];
+            const businessCardFileName = `${uuidv4()}-${businessCardFile.originalname}`;
+            const businessCardFilePath = `${businessCardFolder}/${businessCardFileName}`;
+            console.log(`[Supabase Upload] Uploading business card: ${businessCardFilePath}`);
+            const { data: cardUploadData, error: cardUploadError } = await supabaseAdmin.storage
+                .from('profile-images') // 동일 버킷 사용 (또는 다른 버킷 지정 가능)
+                .upload(businessCardFilePath, businessCardFile.buffer, {
+                    contentType: businessCardFile.mimetype,
+                    upsert: false,
+                });
+
+            if (cardUploadError) {
+                console.error(`[Supabase Upload] Error uploading business card ${businessCardFileName}:`, cardUploadError);
+                throw new Error(`Failed to upload business card: ${cardUploadError.message}`);
+            }
+
+            const { data: cardUrlData } = supabaseAdmin.storage
+                .from('profile-images')
+                .getPublicUrl(businessCardFilePath);
+                
+            if (!cardUrlData || !cardUrlData.publicUrl) {
+                 console.error(`[Supabase Upload] Failed to get public URL for ${businessCardFilePath}`);
+                 throw new Error(`Failed to get public URL for business card.`);
+            }
+            uploadedBusinessCardUrl = cardUrlData.publicUrl;
+            console.log(`[Supabase Upload] Business card uploaded: ${uploadedBusinessCardUrl}`);
+            
+            // ----- End Supabase Upload Logic -----
+
+            // --- Create NEW user record (using sessionEmail) --- 
             const newUser = await User.create({
-                googleId: provider === 'google' ? googleId : null, // Store googleId if provider is google
-                kakaoId: provider === 'kakao' ? googleId : null,   // Store kakaoId if provider is kakao
-                email: sessionEmail, // This might be the nickname for Kakao users
+                // Assign social ID based on provider
+                googleId: provider === 'google' ? socialId : null,
+                kakaoId: provider === 'kakao' ? socialId : null,
+                email: sessionEmail, // Use email from session
                 name: sessionName, // Use name from session
+                nickname: nickname, // Use nickname from form
                 age: parseInt(age),
                 height: parseInt(height),
                 mbti: mbti.toUpperCase(),
                 gender: gender.toLowerCase(),
-                city: city.toLowerCase(), // city 필드 저장
-                profileImageUrls: profileImageUrls,
-                businessCardImageUrl: businessCardImageUrl,
+                city: city.toLowerCase(),
+                profileImageUrls: uploadedProfileUrls, // Supabase URLs 저장
+                businessCardImageUrl: uploadedBusinessCardUrl, // Supabase URL 저장
                 status: 'pending_approval', 
-                occupation: false, 
+                occupation: false, // 기본값 false 설정
             });
-            console.log(`[complete-social] New user ${newUser.id} created via ${provider} completion, status set to pending_approval. Email/Identifier: ${sessionEmail}`);
+            console.log(`[complete-social] New user ${newUser.id} created via ${provider} completion. Supabase URLs saved. Status set to pending_approval.`);
             // -------------------------------
 
             // --- Clear pending profile from session --- 
             if (req.session) {
                  req.session.pendingSocialProfile = null;
-                 // Save session explicitly if needed, although often handled by middleware
                  req.session.save(saveErr => {
                       if (saveErr) console.error('[complete-social] Error saving session after clearing pending profile:', saveErr);
                  });
@@ -881,31 +874,34 @@ router.post(
 
             // Prepare user response
             const userResponse = {
-                 id: newUser.id, email: newUser.email, name: newUser.name,
+                 id: newUser.id, email: newUser.email, name: newUser.name, nickname: newUser.nickname,
                  gender: newUser.gender, age: newUser.age, height: newUser.height,
                  mbti: newUser.mbti, profileImageUrls: newUser.profileImageUrls,
-                 businessCardImageUrl: newUser.businessCardImageUrl, status: newUser.status
+                 businessCardImageUrl: newUser.businessCardImageUrl, status: newUser.status,
+                 city: newUser.city
             };
 
             // Send success response
-            res.status(200).json({ // Use 200 OK as user is created but pending
+            res.status(200).json({ 
                 message: 'Profile information submitted successfully. Waiting for administrator approval.',
                 token: token,
                 user: userResponse
             });
 
         } catch (error: any) {
-             console.error(`[POST /api/auth/complete-social] Error processing profile completion for social user ${sessionEmail}:`, error);
-             cleanupFiles(); 
-              // Clear session on error too?
-              if(req.session) req.session.pendingSocialProfile = null;
+            console.error(`[POST /api/auth/complete-social] Error processing profile completion for social user ${sessionEmail}:`, error);
+            // If upload failed partially, Supabase doesn't have automatic rollback
+            // We might need manual cleanup logic here based on uploaded URLs if needed
+            // Currently, we just log the error.
+             if(req.session) req.session.pendingSocialProfile = null;
 
             if (error.name === 'SequelizeValidationError') {
                 res.status(400).json({ message: 'Database validation failed.', errors: error.errors?.map((e:any) => e.message) });
             } else if (error.name === 'SequelizeDatabaseError') {
                  res.status(500).json({ message: 'Database error during user creation.' });
             } else {
-                 next(error);
+                 // Handle specific Supabase upload errors or general errors
+                 res.status(500).json({ message: error.message || 'An unexpected error occurred during profile completion.' });
             }
         }
     }

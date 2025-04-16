@@ -1,10 +1,12 @@
 import express, { Request, Response, NextFunction, RequestHandler } from 'express';
 import { authenticateToken } from '../middleware/authMiddleware';
-import multer from 'multer';
+import multer, { FileFilterCallback } from 'multer';
 import path from 'path';
 import fs from 'fs';
 import jwt from 'jsonwebtoken';
 import { JWT_SECRET } from '../config/jwt';
+import { v4 as uuidv4 } from 'uuid';
+import supabaseAdmin from '../utils/supabaseClient';
 const db = require('../../models');
 const User = db.User;
 const Match = db.Match;
@@ -75,14 +77,18 @@ router.get('/me', authenticateToken, async (req: Request, res: Response, next: N
                 'id',
                 'email',
                 'name',
+                'nickname',
                 'gender',
                 'dob',
                 'age',
                 'height',
                 'mbti',
                 'occupation',
-                'profilePictureUrl',
-                'status' // Include the status field
+                'profileImageUrls',
+                'businessCardImageUrl',
+                'status',
+                'rejectionReason',
+                'city'
                 // Exclude passwordHash, googleId, etc.
             ]
         });
@@ -92,7 +98,7 @@ router.get('/me', authenticateToken, async (req: Request, res: Response, next: N
             return; // Return void
         }
         
-        console.log('[GET /api/profile/me] Found user:', user.toJSON()); // Log found user
+        console.log('[GET /api/profile/me] Found user data:', JSON.stringify(user.toJSON())); // Log found user data
         res.status(200).json(user);
         // No explicit return needed
 
@@ -358,71 +364,45 @@ router.delete('/me', authenticateToken, (async (req: Request, res: Response, nex
     }
 }) as RequestHandler);
 
-// --- Multer Configuration (Copied and adapted from auth.ts for regular users) ---
-const uploadsBaseDir = path.join(__dirname, '..', '..', 'uploads');
-const profileUploadDir = path.join(uploadsBaseDir, 'profiles');
-const cardUploadDir = path.join(uploadsBaseDir, 'business_cards');
-fs.mkdirSync(profileUploadDir, { recursive: true });
-fs.mkdirSync(cardUploadDir, { recursive: true });
-console.log(`[Profile Multer] Ensured upload directories exist.`);
+// --- Multer Configuration (메모리 저장소 사용) ---
+const storage = multer.memoryStorage();
 
-type DestinationCallback = (error: Error | null, destination: string) => void;
-type FileNameCallback = (error: Error | null, filename: string) => void;
-
-const storage = multer.diskStorage({
-    destination: (req: Request, file: Express.Multer.File, cb: DestinationCallback) => {
-        let uploadPath = '';
-        if (file.fieldname === 'profilePictures') uploadPath = profileUploadDir;
-        else if (file.fieldname === 'businessCard') uploadPath = cardUploadDir;
-        else return cb(new Error('Invalid field name for file upload'), '');
-        cb(null, uploadPath);
-    },
-    filename: (req: any, file: Express.Multer.File, cb: FileNameCallback) => {
-        // ★ Use userId from token for filename ★
-        const userId = req.user?.userId || 'unknown-user'; 
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        const extension = path.extname(file.originalname);
-        const filename = `${userId}-${file.fieldname}-${uniqueSuffix}${extension}`;
-        console.log(`[Profile Multer] Generating filename: ${filename} for user: ${userId}`);
-        cb(null, filename);
-    }
-});
-
-const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+const fileFilter = (req: Request, file: Express.Multer.File, cb: FileFilterCallback) => {
     if (file.mimetype.startsWith('image/')) cb(null, true);
-    else cb(new Error('Invalid file type, only images are allowed!'));
+    else cb(new Error('Invalid file type, only images are allowed!') as any);
 };
 
 const upload = multer({ storage, fileFilter, limits: { fileSize: 10 * 1024 * 1024, files: 4 } });
 // --- End Multer Configuration ---
 
-// --- ★ NEW Endpoint for Regular Signup Profile Completion ★ ---
+// --- ★ NEW Endpoint for Regular Signup Profile Completion (or Update) ★ ---
 /**
  * @swagger
  * /api/profile/complete-regular:
  *   post:
- *     summary: Complete user profile after regular signup (with file uploads)
+ *     summary: Complete or Update profile after regular signup (with file uploads)
  *     tags: [User Profile]
  *     security:
- *       - bearerAuth: [] # Requires JWT token
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
  *         multipart/form-data:
  *           schema:
  *             type: object
- *             required: [age, height, mbti, gender, profilePictures, businessCard]
  *             properties:
  *               age: { type: integer }
  *               height: { type: integer }
  *               mbti: { type: string, maxLength: 4 }
  *               gender: { type: string, enum: ['male', 'female'] }
- *               profilePictures: { type: array, items: { type: string, format: binary }, maxItems: 3 }
- *               businessCard: { type: string, format: binary }
+ *               nickname: { type: string }
+ *               city: { type: string }
+ *               profilePictures: { type: array, items: { type: string, format: binary }, maxItems: 3, description: "(Optional for update) Profile pictures (min 1 on first completion)" }
+ *               businessCard: { type: string, format: binary, description: "(Optional for update) Business card image" }
  *     responses:
- *       200: { description: 'Profile completed successfully', content: { application/json: { schema: { $ref: '#/components/schemas/AuthResponse' } } } }
- *       400: { description: 'Validation errors or missing files' }
- *       401: { description: 'Unauthorized (token missing or invalid)' }
+ *       200: { description: 'Profile completed/updated successfully', content: { application/json: { schema: { $ref: '#/components/schemas/AuthResponse' } } } }
+ *       400: { description: 'Validation errors or missing required files on first completion' }
+ *       401: { description: 'Unauthorized' }
  *       404: { description: 'User not found' }
  *       500: { description: 'Server error' }
  */
@@ -436,7 +416,10 @@ router.post(
     ]),
     async (req: Request, res: Response, next: NextFunction): Promise<void> => {
         const userId = (req as any).user?.userId;
-        const files = (req as any).files;
+        const files = (req as any).files as { 
+            profilePictures?: Express.Multer.File[];
+            businessCard?: Express.Multer.File[];
+        };
 
         console.log(`[POST /api/profile/complete-regular] Processing request for user ID: ${userId}`);
 
@@ -446,101 +429,199 @@ router.post(
             return;
         }
 
-        const cleanupFiles = () => {
-             console.warn(`[complete-regular] Cleaning up uploaded files for failed request (User ID: ${userId}).`);
-             if (files?.profilePictures) files.profilePictures.forEach((f: Express.Multer.File) => { try { fs.unlinkSync(f.path); } catch (e) { console.error(`Error deleting ${f.path}:`, e); }});
-             if (files?.businessCard) files.businessCard.forEach((f: Express.Multer.File) => { try { fs.unlinkSync(f.path); } catch (e) { console.error(`Error deleting ${f.path}:`, e); }});
-        };
-
-        // --- Validation ---
-        const { age, height, mbti, gender } = req.body;
-        const errors: string[] = [];
-        if (!age || isNaN(parseInt(age)) || parseInt(age) < 19) errors.push('Valid age (19+) is required.');
-        if (!height || isNaN(parseInt(height)) || parseInt(height) < 100) errors.push('Valid height (>= 100cm) is required.');
-        if (!mbti || !/^[EI][SN][TF][JP]$/i.test(mbti)) errors.push('Valid MBTI (4 letters) is required.');
-        if (!gender || !['male', 'female'].includes(gender.toLowerCase())) errors.push('Valid gender (male/female) is required.');
-        if (!files?.profilePictures || files.profilePictures.length === 0) errors.push('At least one profile picture required.');
-        else if (files.profilePictures.length > 3) errors.push('Maximum 3 profile pictures allowed.');
-        if (!files?.businessCard || files.businessCard.length === 0) errors.push('Business card image required.');
-        else if (files.businessCard.length > 1) errors.push('Only one business card image allowed.');
-
-        if (errors.length > 0) {
-             console.warn(`[complete-regular] Validation failed for user ${userId}:`, errors);
-             cleanupFiles();
-             res.status(400).json({ message: 'Validation failed', errors });
-             return;
-        }
-        // --- End Validation ---
-
         try {
             const user = await User.findByPk(userId);
             if (!user) {
                 console.error(`[complete-regular] Error: User not found for ID: ${userId}`);
-                cleanupFiles();
                 res.status(404).json({ message: 'User associated with this token not found.' });
                 return;
             }
-            
-            // Check if profile already completed (optional, maybe allow updates?)
-            // if (user.status !== 'pending_profile_completion') { ... }
 
-            // Prepare file paths
-            if (!files || !files.profilePictures || !files.businessCard) { // Simplified check after validation
-                 console.error('[complete-regular] Internal Server Error: File objects missing after validation.');
-                 cleanupFiles();
-                 res.status(500).json({ message: 'Internal server error processing uploaded files.' });
+            const isFirstCompletion = user.status === 'pending_profile';
+            console.log(`[complete-regular] Is first completion for user ${userId}? ${isFirstCompletion}`);
+
+            // --- Validation ---
+            const { age, height, mbti, gender, city, nickname } = req.body;
+            const errors: string[] = [];
+            
+            // Validate required fields based on whether it's the first completion or an update
+            if (isFirstCompletion) {
+                if (!nickname || nickname.trim() === '') errors.push('Nickname is required.');
+                if (!age || isNaN(parseInt(age)) || parseInt(age) < 19) errors.push('Valid age (19+) is required.');
+                if (!height || isNaN(parseInt(height)) || parseInt(height) < 100) errors.push('Valid height (>= 100cm) is required.');
+                if (!mbti || !/^[EI][SN][TF][JP]$/i.test(mbti)) errors.push('Valid MBTI (4 letters) is required.');
+                if (!gender || !['male', 'female'].includes(gender.toLowerCase())) errors.push('Valid gender (male/female) is required.');
+                if (!city || !['seoul', 'busan', 'jeju'].includes(city.toLowerCase())) errors.push('Valid city (seoul/busan/jeju) is required.');
+                if (!files?.profilePictures || files.profilePictures.length === 0) errors.push('At least one profile picture required.');
+                if (!files?.businessCard || files.businessCard.length === 0) errors.push('Business card image required.');
+            } else {
+                // For updates, validate only fields that are present in the request
+                if (nickname !== undefined && nickname.trim() === '') errors.push('Nickname cannot be empty if provided.');
+                if (age !== undefined && (isNaN(parseInt(age)) || parseInt(age) < 19)) errors.push('Age must be a valid number (19+) if provided.');
+                if (height !== undefined && (isNaN(parseInt(height)) || parseInt(height) < 100)) errors.push('Height must be a valid number (>= 100cm) if provided.');
+                if (mbti !== undefined && !/^[EI][SN][TF][JP]$/i.test(mbti)) errors.push('MBTI must be 4 valid letters if provided.');
+                if (gender !== undefined && !['male', 'female'].includes(gender.toLowerCase())) errors.push('Gender must be male or female if provided.');
+                if (city !== undefined && !['seoul', 'busan', 'jeju'].includes(city.toLowerCase())) errors.push('City must be seoul, busan, or jeju if provided.');
+                // No validation for files on update, they are optional
+            }
+            
+            // Common file validation (max count)
+            if (files?.profilePictures && files.profilePictures.length > 3) {
+                 errors.push('Maximum 3 profile pictures allowed.');
+            }
+            if (files?.businessCard && files.businessCard.length > 1) {
+                 errors.push('Only one business card image allowed.');
+            }
+
+            if (errors.length > 0) {
+                 console.warn(`[complete-regular] Validation failed for user ${userId}:`, errors);
+                 res.status(400).json({ message: 'Validation failed', errors });
                  return;
             }
-            const profileImageUrls = files.profilePictures.map((file: Express.Multer.File) => `/uploads/profiles/${path.basename(file.path)}`);
-            const businessCardImageUrl = `/uploads/business_cards/${path.basename(files.businessCard[0].path)}`;
+            // --- End Validation ---
+            
+            // ----- Supabase Upload and Deletion Logic ----- 
+            let uploadedProfileUrls: string[] = user.profileImageUrls || []; // Keep existing if no new files
+            let uploadedBusinessCardUrl: string | null = user.businessCardImageUrl || null; // Keep existing
+            const profileImageFolder = `profiles/${userId}`;
+            const businessCardFolder = `business_cards/${userId}`;
+            
+            // -- Function to delete old files from Supabase --
+            const deleteSupabaseFile = async (filePath: string) => {
+                 if (!filePath) return;
+                 // Extract the path after the bucket name from the public URL
+                 const urlParts = filePath.split('/profile-images/');
+                 if (urlParts.length < 2) {
+                     console.warn(`[Supabase Delete] Could not parse file path from URL: ${filePath}`);
+                     return;
+                 }
+                 const supabasePath = urlParts[1];
+                 console.log(`[Supabase Delete] Deleting old file: ${supabasePath}`);
+                 try {
+                     const { error: deleteError } = await supabaseAdmin.storage
+                         .from('profile-images')
+                         .remove([supabasePath]);
+                     if (deleteError) {
+                         console.error(`[Supabase Delete] Error deleting file ${supabasePath}:`, deleteError);
+                         // Log error but continue, don't block the update
+                     }
+                 } catch (e) {
+                      console.error(`[Supabase Delete] Exception deleting file ${supabasePath}:`, e);
+                 }
+            };
+            // ----------------------------------------------
+
+            // Upload NEW Profile Pictures (if provided)
+            if (files?.profilePictures && files.profilePictures.length > 0) {
+                 console.log(`[Supabase Upload] Processing profile pictures for user ${userId}...`);
+                 // 기존 이미지 유지
+                 if (!user.profileImageUrls || !Array.isArray(user.profileImageUrls)) {
+                     uploadedProfileUrls = [];  // 기존 이미지가 없으면 빈 배열에서 시작
+                 }
+                 
+                 for (const file of files.profilePictures) {
+                     const fileName = `${uuidv4()}-${file.originalname}`;
+                     const filePath = `${profileImageFolder}/${fileName}`;
+                     console.log(`[Supabase Upload] Uploading new profile picture: ${filePath}`);
+                     const { error: uploadError } = await supabaseAdmin.storage
+                         .from('profile-images')
+                         .upload(filePath, file.buffer, { contentType: file.mimetype, upsert: false });
+
+                     if (uploadError) throw new Error(`Failed to upload profile picture: ${uploadError.message}`);
+                     
+                     const { data: urlData } = supabaseAdmin.storage.from('profile-images').getPublicUrl(filePath);
+                     if (!urlData || !urlData.publicUrl) throw new Error(`Failed to get public URL for profile picture.`);
+                     uploadedProfileUrls.push(urlData.publicUrl);
+                     console.log(`[Supabase Upload] New profile picture uploaded: ${urlData.publicUrl}`);
+                 }
+            }
+
+            // Upload NEW Business Card (if provided)
+            if (files?.businessCard && files.businessCard.length > 0) {
+                 console.log(`[Supabase Upload] Deleting old business card for user ${userId}...`);
+                 // Delete old business card before uploading new one
+                 await deleteSupabaseFile(user.businessCardImageUrl);
+
+                 const businessCardFile = files.businessCard[0];
+                 const businessCardFileName = `${uuidv4()}-${businessCardFile.originalname}`;
+                 const businessCardFilePath = `${businessCardFolder}/${businessCardFileName}`;
+                 console.log(`[Supabase Upload] Uploading new business card: ${businessCardFilePath}`);
+                 const { error: cardUploadError } = await supabaseAdmin.storage
+                     .from('profile-images')
+                     .upload(businessCardFilePath, businessCardFile.buffer, { contentType: businessCardFile.mimetype, upsert: false });
+
+                 if (cardUploadError) throw new Error(`Failed to upload business card: ${cardUploadError.message}`);
+
+                 const { data: cardUrlData } = supabaseAdmin.storage.from('profile-images').getPublicUrl(businessCardFilePath);
+                 if (!cardUrlData || !cardUrlData.publicUrl) throw new Error(`Failed to get public URL for business card.`);
+                 uploadedBusinessCardUrl = cardUrlData.publicUrl;
+                 console.log(`[Supabase Upload] New business card uploaded: ${uploadedBusinessCardUrl}`);
+            }
+            // ----- End Supabase Upload Logic -----
+
+            // --- Prepare update data --- 
+            const updates: any = {};
+            if (nickname !== undefined) updates.nickname = nickname;
+            if (age !== undefined) updates.age = parseInt(age);
+            if (height !== undefined) updates.height = parseInt(height);
+            if (mbti !== undefined) updates.mbti = mbti.toUpperCase();
+            if (gender !== undefined) updates.gender = gender.toLowerCase();
+            if (city !== undefined) updates.city = city.toLowerCase();
+            // Only update URLs if new ones were uploaded
+            if (files?.profilePictures && files.profilePictures.length > 0) updates.profileImageUrls = uploadedProfileUrls;
+            if (files?.businessCard && files.businessCard.length > 0) updates.businessCardImageUrl = uploadedBusinessCardUrl;
+            
+            // Always set status to pending_approval on completion/update
+            updates.status = 'pending_approval';
+            updates.rejectionReason = null; // Clear rejection reason on update
 
             // --- Update user record --- 
-            await user.update({
-                age: parseInt(age),
-                height: parseInt(height),
-                mbti: mbti.toUpperCase(),
-                gender: gender.toLowerCase(),
-                profileImageUrls: profileImageUrls,
-                businessCardImageUrl: businessCardImageUrl,
-                status: 'pending_approval', // Set status to pending after completion
-                rejectionReason: null, // ★ Clear rejection reason upon successful completion/resubmission ★
-                occupation: false, // Keep occupation false until admin approves
-            });
-            console.log(`[complete-regular] User ${userId} profile completed, status set to pending_approval, rejection reason cleared.`);
-            // -------------------------
+            await user.update(updates);
+            console.log(`[complete-regular] User ${userId} updated successfully. Status set to pending_approval.`);
+            // ---------------------------
 
             // --- Generate NEW token with pending_approval status --- 
             const payload = {
-                userId: user.id,
-                email: user.email, // Email shouldn't change here
-                status: 'pending_approval', // Use the new status
-                gender: user.gender // Include updated gender
+                userId: user.id, 
+                email: user.email,
+                status: 'pending_approval', 
+                gender: updates.gender || user.gender // Use updated or existing gender
             };
             const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
-            // -------------------------------------------------------
+            // --------------------------------------------------------------
 
-            // Prepare user response
-            const updatedUser = await User.findByPk(userId, { attributes: { exclude: ['passwordHash', 'googleId', 'kakaoId'] } }); // Fetch updated user data
+            // Prepare user response (refetch might be better but use updated data for now)
+            const updatedUserData = { ...user.toJSON(), ...updates };
+            const userResponse = {
+                 id: updatedUserData.id, email: updatedUserData.email, name: updatedUserData.name, 
+                 nickname: updatedUserData.nickname, gender: updatedUserData.gender, 
+                 age: updatedUserData.age, height: updatedUserData.height, mbti: updatedUserData.mbti,
+                 profileImageUrls: updatedUserData.profileImageUrls,
+                 businessCardImageUrl: updatedUserData.businessCardImageUrl, 
+                 status: updatedUserData.status, city: updatedUserData.city
+            };
 
-            res.status(200).json({
-                message: 'Profile information submitted successfully. Waiting for administrator approval.',
-                token: token, // Send the new token
-                user: updatedUser // Send updated user data
+            // Send success response
+            res.status(200).json({ 
+                message: isFirstCompletion ? 'Profile completed successfully. Waiting for approval.' : 'Profile updated successfully. Waiting for approval.',
+                token: token,
+                user: userResponse
             });
 
         } catch (error: any) {
-            console.error(`[POST /api/profile/complete-regular] Error processing profile completion for user ${userId}:`, error);
-            cleanupFiles();
-            // Handle specific DB errors if needed
-             if (error.name === 'SequelizeValidationError' || error.name === 'SequelizeDatabaseError') {
-                res.status(500).json({ message: 'Database error during profile update.' });
-             } else {
-                 next(error);
-             }
+            console.error(`[POST /api/profile/complete-regular] Error processing request for user ${userId}:`, error);
+            // Don't cleanup files on error here, as Supabase doesn't rollback
+            if (error.name === 'SequelizeValidationError') {
+                res.status(400).json({ message: 'Database validation failed.', errors: error.errors?.map((e:any) => e.message) });
+            } else if (error.name === 'SequelizeDatabaseError') {
+                 res.status(500).json({ message: 'Database error during user update.' });
+            } else {
+                 // Handle specific Supabase upload errors or general errors
+                 res.status(500).json({ message: error.message || 'An unexpected error occurred during profile update.' });
+            }
         }
     }
 );
-// --- ★ End NEW Endpoint ★ ---
 
 // --- Swagger Schema Definition (Add this later in server.ts or a dedicated file) ---
 /**

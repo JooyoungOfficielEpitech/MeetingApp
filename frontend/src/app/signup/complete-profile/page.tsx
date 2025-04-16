@@ -11,6 +11,8 @@ import axiosInstance from '@/utils/axiosInstance'; // Ensure this path is correc
 // --- axios import 추가 ---
 import axios from 'axios'; // Assuming standard axios is available
 // -----------------------
+// UUID 생성 라이브러리 추가
+import { v4 as uuidv4 } from 'uuid';
 
 // Initialize fonts (same as login page)
 const montserrat = Montserrat({ subsets: ['latin'], weight: ['700', '800'] });
@@ -70,6 +72,17 @@ interface ProfileFormData {
   mbti?: string;
   [key: string]: string | undefined;
 }
+
+// Helper function to rename file with UUID
+const renameFileWithUUID = (file: File): File => {
+  // 파일 확장자 추출
+  const fileExtension = file.name.split('.').pop() || '';
+  // UUID 생성 및 확장자와 결합
+  const newFileName = `${uuidv4()}.${fileExtension}`;
+  
+  // 새 파일 이름으로 파일 객체 생성 (타입, 내용 유지)
+  return new File([file], newFileName, { type: file.type });
+};
 
 // Client Component that uses useSearchParams
 function CompleteProfileContent() {
@@ -320,13 +333,18 @@ function CompleteProfileContent() {
                 formData.append('mbti', (data.mbti || '').toUpperCase());
                 formData.append('city', data.city); // 도시 정보 추가
                 
-                // 프로필 사진 추가 (최대 3장)
+                // 프로필 사진 추가 (최대 3장) - UUID로 파일명 변경
                 profilePictures.forEach((file, index) => {
-                    formData.append('profilePictures', file);
+                    // 파일 이름을 UUID로 변경
+                    const renamedFile = renameFileWithUUID(file);
+                    formData.append('profilePictures', renamedFile);
                 });
                 
-                // 명함 추가
-                formData.append('businessCard', businessCard);
+                // 명함 추가 - UUID로 파일명 변경
+                if (businessCard) {
+                    const renamedBusinessCard = renameFileWithUUID(businessCard);
+                    formData.append('businessCard', renamedBusinessCard);
+                }
                 
                 // 디버깅을 위해 FormData 내용 출력 (FormData는 직접 출력할 수 없음)
                 console.log('[CompleteProfile] 전송할 데이터:');
