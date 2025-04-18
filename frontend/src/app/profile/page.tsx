@@ -80,7 +80,6 @@ const renameFileWithUUID = (file: File): File => {
 // --- Inner component using hooks ---
 function ProfileContent() {
     console.log("🚨🚨🚨 프로필 페이지 컴포넌트 로드됨");
-    alert("프로필 페이지가 로드되었습니다. 콘솔 로그를 확인하세요.");
     
     const router = useRouter();
     const searchParams = useSearchParams(); // Get search params

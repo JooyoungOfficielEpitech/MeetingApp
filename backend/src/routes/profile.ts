@@ -7,11 +7,18 @@ import jwt from 'jsonwebtoken';
 import { JWT_SECRET } from '../config/jwt';
 import { v4 as uuidv4 } from 'uuid';
 import supabaseAdmin from '../utils/supabaseClient';
+import { createClient } from '@supabase/supabase-js';
+import dotenv from 'dotenv';
 const db = require('../../models');
 const User = db.User;
 const Match = db.Match;
 const { Op } = require("sequelize");
 const MatchingWaitList = db.MatchingWaitList;
+
+// 환경 변수 로드
+dotenv.config();
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
 // --- ★ Define Request Type Structure Locally ★ ---
 interface AuthenticatedRequestWithFiles extends Request {
@@ -519,6 +526,20 @@ router.post(
                      uploadedProfileUrls = [];  // 기존 이미지가 없으면 빈 배열에서 시작
                  }
                  
+                 // 업로드 직전에 새로운 Supabase 클라이언트 초기화
+                 console.log('[Supabase Upload] 새로운 Supabase 클라이언트 초기화 중...');
+                 const freshSupabase = createClient(
+                     SUPABASE_URL || '',
+                     SUPABASE_SERVICE_KEY || '',
+                     {
+                         auth: {
+                             persistSession: false,
+                             autoRefreshToken: true
+                         }
+                     }
+                 );
+                 console.log('[Supabase Upload] 새로운 클라이언트 초기화 완료');
+                 
                  for (const file of files.profilePictures) {
                      const fileName = `${uuidv4()}-${file.originalname}`;
                      const filePath = `${profileImageFolder}/${fileName}`;
@@ -526,7 +547,7 @@ router.post(
                      try {
                          console.log(`[Supabase Upload Debug] 업로드 시작 - 버퍼 크기: ${file.buffer.length} 바이트, MIME 타입: ${file.mimetype}`);
                          
-                         const { data: uploadResult, error: uploadError } = await supabaseAdmin.storage
+                         const { data: uploadResult, error: uploadError } = await freshSupabase.storage
                              .from('profile-images')
                              .upload(filePath, file.buffer, { contentType: file.mimetype, upsert: false });
                          
@@ -541,7 +562,7 @@ router.post(
                          }
                          
                          console.log(`[Supabase URL] Public URL 요청 시작 - 경로: ${filePath}`);
-                         const { data: urlData } = supabaseAdmin.storage.from('profile-images').getPublicUrl(filePath);
+                         const { data: urlData } = freshSupabase.storage.from('profile-images').getPublicUrl(filePath);
                          console.log(`[Supabase URL] Public URL 응답 - 성공: true, URL: ${urlData?.publicUrl || '없음'}`);
                          
                          if (!urlData || !urlData.publicUrl) {
@@ -563,17 +584,29 @@ router.post(
                  // Delete old business card before uploading new one
                  await deleteSupabaseFile(user.businessCardImageUrl);
 
+                 // 업로드 직전에 새로운 Supabase 클라이언트 초기화
+                 const freshSupabase = createClient(
+                     SUPABASE_URL || '',
+                     SUPABASE_SERVICE_KEY || '',
+                     {
+                         auth: {
+                             persistSession: false,
+                             autoRefreshToken: true
+                         }
+                     }
+                 );
+                 
                  const businessCardFile = files.businessCard[0];
                  const businessCardFileName = `${uuidv4()}-${businessCardFile.originalname}`;
                  const businessCardFilePath = `${businessCardFolder}/${businessCardFileName}`;
                  console.log(`[Supabase Upload] Uploading new business card: ${businessCardFilePath}`);
-                 const { error: cardUploadError } = await supabaseAdmin.storage
+                 const { error: cardUploadError } = await freshSupabase.storage
                      .from('profile-images')
                      .upload(businessCardFilePath, businessCardFile.buffer, { contentType: businessCardFile.mimetype, upsert: false });
 
                  if (cardUploadError) throw new Error(`Failed to upload business card: ${cardUploadError.message}`);
 
-                 const { data: cardUrlData } = supabaseAdmin.storage.from('profile-images').getPublicUrl(businessCardFilePath);
+                 const { data: cardUrlData } = freshSupabase.storage.from('profile-images').getPublicUrl(businessCardFilePath);
                  if (!cardUrlData || !cardUrlData.publicUrl) throw new Error(`Failed to get public URL for business card.`);
                  uploadedBusinessCardUrl = cardUrlData.publicUrl;
                  console.log(`[Supabase Upload] New business card uploaded: ${uploadedBusinessCardUrl}`);
@@ -806,6 +839,20 @@ router.post(
                      }
                  }
                  
+                 // 업로드 직전에 새로운 Supabase 클라이언트 초기화
+                 console.log('[Supabase Upload] 새로운 Supabase 클라이언트 초기화 중...');
+                 const freshSupabase = createClient(
+                     SUPABASE_URL || '',
+                     SUPABASE_SERVICE_KEY || '',
+                     {
+                         auth: {
+                             persistSession: false,
+                             autoRefreshToken: true
+                         }
+                     }
+                 );
+                 console.log('[Supabase Upload] 새로운 클라이언트 초기화 완료');
+                 
                  // 새 이미지 업로드
                  uploadedProfileUrls = [];  // 기존 이미지 전부 교체
                  
@@ -816,7 +863,7 @@ router.post(
                      try {
                          console.log(`[Supabase Upload Debug] 업로드 시작 - 버퍼 크기: ${file.buffer.length} 바이트, MIME 타입: ${file.mimetype}`);
                          
-                         const { data: uploadResult, error: uploadError } = await supabaseAdmin.storage
+                         const { data: uploadResult, error: uploadError } = await freshSupabase.storage
                              .from('profile-images')
                              .upload(filePath, file.buffer, { contentType: file.mimetype, upsert: false });
                          
@@ -831,7 +878,7 @@ router.post(
                          }
                          
                          console.log(`[Supabase URL] Public URL 요청 시작 - 경로: ${filePath}`);
-                         const { data: urlData } = supabaseAdmin.storage.from('profile-images').getPublicUrl(filePath);
+                         const { data: urlData } = freshSupabase.storage.from('profile-images').getPublicUrl(filePath);
                          console.log(`[Supabase URL] Public URL 응답 - 성공: true, URL: ${urlData?.publicUrl || '없음'}`);
                          
                          if (!urlData || !urlData.publicUrl) {
@@ -853,17 +900,29 @@ router.post(
                  // Delete old business card before uploading new one
                  await deleteSupabaseFile(user.businessCardImageUrl);
 
+                 // 업로드 직전에 새로운 Supabase 클라이언트 초기화
+                 const freshSupabase = createClient(
+                     SUPABASE_URL || '',
+                     SUPABASE_SERVICE_KEY || '',
+                     {
+                         auth: {
+                             persistSession: false,
+                             autoRefreshToken: true
+                         }
+                     }
+                 );
+                 
                  const businessCardFile = files.businessCard[0];
                  const businessCardFileName = `${uuidv4()}-${businessCardFile.originalname}`;
                  const businessCardFilePath = `${businessCardFolder}/${businessCardFileName}`;
                  console.log(`[Supabase Upload] Uploading new business card: ${businessCardFilePath}`);
-                 const { error: cardUploadError } = await supabaseAdmin.storage
+                 const { error: cardUploadError } = await freshSupabase.storage
                      .from('profile-images')
                      .upload(businessCardFilePath, businessCardFile.buffer, { contentType: businessCardFile.mimetype, upsert: false });
 
                  if (cardUploadError) throw new Error(`Failed to upload business card: ${cardUploadError.message}`);
 
-                 const { data: cardUrlData } = supabaseAdmin.storage.from('profile-images').getPublicUrl(businessCardFilePath);
+                 const { data: cardUrlData } = freshSupabase.storage.from('profile-images').getPublicUrl(businessCardFilePath);
                  if (!cardUrlData || !cardUrlData.publicUrl) throw new Error(`Failed to get public URL for business card.`);
                  uploadedBusinessCardUrl = cardUrlData.publicUrl;
                  console.log(`[Supabase Upload] New business card uploaded: ${uploadedBusinessCardUrl}`);
