@@ -102,12 +102,14 @@ import profileRoutes from './routes/profile';
 import matchesRouter from './routes/matches';
 import mainRoutes from './routes/main';
 import adminRoutes from './routes/admin';
+import messagesRoutes from './routes/messages';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/matches', matchesRouter);
 app.use('/api/main', mainRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/messages', messagesRoutes);
 
 const PORT = process.env.PORT || 3001;
 
@@ -160,19 +162,20 @@ app.get('/hello', (req, res) => {
 });
 
 // --- Server Start ---
-server.listen(PORT, async () => {
-    console.log(`Server listening on *:${PORT}`);
-    console.log(`Swagger UI available at http://localhost:${PORT}/api-docs`);
+if (process.env.NO_SERVER_START !== 'true') {
+    server.listen(PORT, async () => {
+        console.log(`Server listening on *:${PORT}`);
+        console.log(`Swagger UI available at http://localhost:${PORT}/api-docs`);
 
-    try {
-        await db.sequelize.authenticate(); // db needed
-        console.log('Database connection established successfully.');
-        await ensureAdminUser(); // Call the imported utility function
-    } catch (error) {
-        console.error('Unable to connect to the database or ensure admin user:', error);
-    }
-});
-// --------------------
+        try {
+            await db.sequelize.authenticate(); // db needed
+            console.log('Database connection established successfully.');
+            await ensureAdminUser(); // Call the imported utility function
+        } catch (error) {
+            console.error('Unable to connect to the database or ensure admin user:', error);
+        }
+    });
+}
 
-// Add an export for the app and server if needed elsewhere, although typically server.ts is the final entry point.
-// export { app, server }; 
+// supertest를 위한 올바른 export 설정
+export { app, server }; 

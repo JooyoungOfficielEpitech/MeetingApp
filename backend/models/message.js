@@ -26,7 +26,12 @@ module.exports = (sequelize, DataTypes) => {
     senderId: DataTypes.INTEGER,
     // ★ Revert field name back to 'text' to match DB column ★
     text: DataTypes.TEXT,
-    timestamp: DataTypes.DATE // Consider naming consistency (e.g., createdAt?)
+    timestamp: DataTypes.DATE, // Consider naming consistency (e.g., createdAt?)
+    read: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+      allowNull: false
+    }
   }, {
     sequelize,
     modelName: 'Message',

@@ -2,5 +2,13 @@
   "dependencies": {
     "@types/uuid": "^10.0.0",
     "uuid": "^11.1.0"
+  },
+  "scripts": {
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx}": [
+      "npm test -- --findRelatedTests"
+    ]
   }
 }
