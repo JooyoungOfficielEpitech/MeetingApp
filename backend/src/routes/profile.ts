@@ -6,19 +6,21 @@ import fs from 'fs';
 import jwt from 'jsonwebtoken';
 import { JWT_SECRET } from '../config/jwt';
 import { v4 as uuidv4 } from 'uuid';
-import supabaseAdmin from '../utils/supabaseClient';
-import { createClient } from '@supabase/supabase-js';
-import dotenv from 'dotenv';
+import { deleteSupabaseFile } from '../utils/supabaseUploader';
+import { validateProfileUpdate } from '../utils/profileValidator';
+import {
+    processProfileImages,
+    processBusinessCard,
+    prepareProfileUpdates,
+    generateTokenAfterProfileUpdate,
+    prepareUserResponse
+} from '../services/profileService';
+
 const db = require('../../models');
 const User = db.User;
 const Match = db.Match;
 const { Op } = require("sequelize");
 const MatchingWaitList = db.MatchingWaitList;
-
-// 환경 변수 로드
-dotenv.config();
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
 // --- ★ Define Request Type Structure Locally ★ ---
 interface AuthenticatedRequestWithFiles extends Request {
@@ -32,8 +34,6 @@ interface AuthenticatedRequestWithFiles extends Request {
         profilePictures?: Express.Multer.File[];
         businessCard?: Express.Multer.File[];
     };
-    // Add session type if needed within this file
-    // session?: import('express-session').Session & Partial<import('express-session').SessionData> & { ... };
 }
 // ---------------------------------------------
 
@@ -448,38 +448,8 @@ router.post(
             console.log(`[complete-regular] Is first completion for user ${userId}? ${isFirstCompletion}`);
 
             // --- Validation ---
-            const { age, height, mbti, gender, city, nickname } = req.body;
-            const errors: string[] = [];
+            const errors = validateProfileUpdate(req.body, files, isFirstCompletion);
             
-            // Validate required fields based on whether it's the first completion or an update
-            if (isFirstCompletion) {
-                if (!nickname || nickname.trim() === '') errors.push('Nickname is required.');
-                if (!age || isNaN(parseInt(age)) || parseInt(age) < 19) errors.push('Valid age (19+) is required.');
-                if (!height || isNaN(parseInt(height)) || parseInt(height) < 100) errors.push('Valid height (>= 100cm) is required.');
-                if (!mbti || !/^[EI][SN][TF][JP]$/i.test(mbti)) errors.push('Valid MBTI (4 letters) is required.');
-                if (!gender || !['male', 'female'].includes(gender.toLowerCase())) errors.push('Valid gender (male/female) is required.');
-                if (!city || !['seoul', 'busan', 'jeju'].includes(city.toLowerCase())) errors.push('Valid city (seoul/busan/jeju) is required.');
-                if (!files?.profilePictures || files.profilePictures.length === 0) errors.push('At least one profile picture required.');
-                if (!files?.businessCard || files.businessCard.length === 0) errors.push('Business card image required.');
-            } else {
-                // For updates, validate only fields that are present in the request
-                if (nickname !== undefined && nickname.trim() === '') errors.push('Nickname cannot be empty if provided.');
-                if (age !== undefined && (isNaN(parseInt(age)) || parseInt(age) < 19)) errors.push('Age must be a valid number (19+) if provided.');
-                if (height !== undefined && (isNaN(parseInt(height)) || parseInt(height) < 100)) errors.push('Height must be a valid number (>= 100cm) if provided.');
-                if (mbti !== undefined && !/^[EI][SN][TF][JP]$/i.test(mbti)) errors.push('MBTI must be 4 valid letters if provided.');
-                if (gender !== undefined && !['male', 'female'].includes(gender.toLowerCase())) errors.push('Gender must be male or female if provided.');
-                if (city !== undefined && !['seoul', 'busan', 'jeju'].includes(city.toLowerCase())) errors.push('City must be seoul, busan, or jeju if provided.');
-                // No validation for files on update, they are optional
-            }
-            
-            // Common file validation (max count)
-            if (files?.profilePictures && files.profilePictures.length > 3) {
-                 errors.push('Maximum 3 profile pictures allowed.');
-            }
-            if (files?.businessCard && files.businessCard.length > 1) {
-                 errors.push('Only one business card image allowed.');
-            }
-
             if (errors.length > 0) {
                  console.warn(`[complete-regular] Validation failed for user ${userId}:`, errors);
                  res.status(400).json({ message: 'Validation failed', errors });
@@ -487,173 +457,48 @@ router.post(
             }
             // --- End Validation ---
             
-            // ----- Supabase Upload and Deletion Logic ----- 
-            let uploadedProfileUrls: string[] = user.profileImageUrls || []; // Keep existing if no new files
-            let uploadedBusinessCardUrl: string | null = user.businessCardImageUrl || null; // Keep existing
-            const profileImageFolder = `profiles/${userId}`;
-            const businessCardFolder = `business_cards/${userId}`;
-            
-            // -- Function to delete old files from Supabase --
-            const deleteSupabaseFile = async (filePath: string) => {
-                 if (!filePath) return;
-                 // Extract the path after the bucket name from the public URL
-                 const urlParts = filePath.split('/profile-images/');
-                 if (urlParts.length < 2) {
-                     console.warn(`[Supabase Delete] Could not parse file path from URL: ${filePath}`);
-                     return;
-                 }
-                 const supabasePath = urlParts[1];
-                 console.log(`[Supabase Delete] Deleting old file: ${supabasePath}`);
-                 try {
-                     const { error: deleteError } = await supabaseAdmin.storage
-                         .from('profile-images')
-                         .remove([supabasePath]);
-                     if (deleteError) {
-                         console.error(`[Supabase Delete] Error deleting file ${supabasePath}:`, deleteError);
-                         // Log error but continue, don't block the update
-                     }
-                 } catch (e) {
-                      console.error(`[Supabase Delete] Exception deleting file ${supabasePath}:`, e);
-                 }
-            };
-            // ----------------------------------------------
+            // ----- File Upload Processing ----- 
+            let uploadedProfileUrls = user.profileImageUrls || []; // Keep existing if no new files
+            let uploadedBusinessCardUrl = user.businessCardImageUrl || null; // Keep existing
 
-            // Upload NEW Profile Pictures (if provided)
+            // Process Profile Images
             if (files?.profilePictures && files.profilePictures.length > 0) {
-                 console.log(`[Supabase Upload] Processing profile pictures for user ${userId}...`);
-                 // 기존 이미지 유지
-                 if (!user.profileImageUrls || !Array.isArray(user.profileImageUrls)) {
-                     uploadedProfileUrls = [];  // 기존 이미지가 없으면 빈 배열에서 시작
-                 }
-                 
-                 // 업로드 직전에 새로운 Supabase 클라이언트 초기화
-                 console.log('[Supabase Upload] 새로운 Supabase 클라이언트 초기화 중...');
-                 const freshSupabase = createClient(
-                     SUPABASE_URL || '',
-                     SUPABASE_SERVICE_KEY || '',
-                     {
-                         auth: {
-                             persistSession: false,
-                             autoRefreshToken: true
-                         }
-                     }
-                 );
-                 console.log('[Supabase Upload] 새로운 클라이언트 초기화 완료');
-                 
-                 for (const file of files.profilePictures) {
-                     const fileName = `${uuidv4()}-${file.originalname}`;
-                     const filePath = `${profileImageFolder}/${fileName}`;
-                     console.log(`[Supabase Upload] Uploading new profile picture: ${filePath}`);
-                     try {
-                         console.log(`[Supabase Upload Debug] 업로드 시작 - 버퍼 크기: ${file.buffer.length} 바이트, MIME 타입: ${file.mimetype}`);
-                         
-                         const { data: uploadResult, error: uploadError } = await freshSupabase.storage
-                             .from('profile-images')
-                             .upload(filePath, file.buffer, { contentType: file.mimetype, upsert: false });
-                         
-                         console.log(`[Supabase Upload Debug] 업로드 응답 - 성공: ${!uploadError}, 데이터: ${JSON.stringify(uploadResult || {})}`);
-                         
-                         if (uploadError) {
-                             console.error(`[Supabase Upload Error] 세부정보:`, { 
-                                 message: uploadError.message,
-                                 name: uploadError.name
-                             });
-                             throw new Error(`Failed to upload profile picture: ${uploadError.message}`);
-                         }
-                         
-                         console.log(`[Supabase URL] Public URL 요청 시작 - 경로: ${filePath}`);
-                         const { data: urlData } = freshSupabase.storage.from('profile-images').getPublicUrl(filePath);
-                         console.log(`[Supabase URL] Public URL 응답 - 성공: true, URL: ${urlData?.publicUrl || '없음'}`);
-                         
-                         if (!urlData || !urlData.publicUrl) {
-                             console.error(`[Supabase URL Error] Public URL을 가져올 수 없음:`, '알 수 없는 오류');
-                             throw new Error(`Failed to get public URL for profile picture.`);
-                         }
-                         uploadedProfileUrls.push(urlData.publicUrl);
-                         console.log(`[Supabase Upload] New profile picture uploaded: ${urlData.publicUrl}`);
-                     } catch (e: any) {
-                         console.error(`[Supabase Exception] 업로드 중 예외 발생:`, e.message, e.stack);
-                         throw e;
-                     }
-                 }
+                uploadedProfileUrls = await processProfileImages(
+                    userId,
+                    files.profilePictures,
+                    user.profileImageUrls,
+                    true // Keep existing images
+                );
             }
 
-            // Upload NEW Business Card (if provided)
+            // Process Business Card
             if (files?.businessCard && files.businessCard.length > 0) {
-                 console.log(`[Supabase Upload] Deleting old business card for user ${userId}...`);
-                 // Delete old business card before uploading new one
-                 await deleteSupabaseFile(user.businessCardImageUrl);
-
-                 // 업로드 직전에 새로운 Supabase 클라이언트 초기화
-                 const freshSupabase = createClient(
-                     SUPABASE_URL || '',
-                     SUPABASE_SERVICE_KEY || '',
-                     {
-                         auth: {
-                             persistSession: false,
-                             autoRefreshToken: true
-                         }
-                     }
-                 );
-                 
-                 const businessCardFile = files.businessCard[0];
-                 const businessCardFileName = `${uuidv4()}-${businessCardFile.originalname}`;
-                 const businessCardFilePath = `${businessCardFolder}/${businessCardFileName}`;
-                 console.log(`[Supabase Upload] Uploading new business card: ${businessCardFilePath}`);
-                 const { error: cardUploadError } = await freshSupabase.storage
-                     .from('profile-images')
-                     .upload(businessCardFilePath, businessCardFile.buffer, { contentType: businessCardFile.mimetype, upsert: false });
-
-                 if (cardUploadError) throw new Error(`Failed to upload business card: ${cardUploadError.message}`);
-
-                 const { data: cardUrlData } = freshSupabase.storage.from('profile-images').getPublicUrl(businessCardFilePath);
-                 if (!cardUrlData || !cardUrlData.publicUrl) throw new Error(`Failed to get public URL for business card.`);
-                 uploadedBusinessCardUrl = cardUrlData.publicUrl;
-                 console.log(`[Supabase Upload] New business card uploaded: ${uploadedBusinessCardUrl}`);
+                uploadedBusinessCardUrl = await processBusinessCard(
+                    userId,
+                    files.businessCard[0],
+                    user.businessCardImageUrl
+                );
             }
-            // ----- End Supabase Upload Logic -----
+            // ----- End File Upload Processing -----
 
             // --- Prepare update data --- 
-            const updates: any = {};
-            if (nickname !== undefined) updates.nickname = nickname;
-            if (age !== undefined) updates.age = parseInt(age);
-            if (height !== undefined) updates.height = parseInt(height);
-            if (mbti !== undefined) updates.mbti = mbti.toUpperCase();
-            if (gender !== undefined) updates.gender = gender.toLowerCase();
-            if (city !== undefined) updates.city = city.toLowerCase();
-            // Only update URLs if new ones were uploaded
-            if (files?.profilePictures && files.profilePictures.length > 0) updates.profileImageUrls = uploadedProfileUrls;
-            if (files?.businessCard && files.businessCard.length > 0) updates.businessCardImageUrl = uploadedBusinessCardUrl;
+            const updates = prepareProfileUpdates({
+                ...req.body,
+                profileImageUrls: files?.profilePictures ? uploadedProfileUrls : undefined,
+                businessCardImageUrl: files?.businessCard ? uploadedBusinessCardUrl : undefined
+            });
             
-            // Always set status to pending_approval on completion/update
-            updates.status = 'pending_approval';
-            updates.rejectionReason = null; // Clear rejection reason on update
-
             // --- Update user record --- 
             await user.update(updates);
             console.log(`[complete-regular] User ${userId} updated successfully. Status set to pending_approval.`);
             // ---------------------------
 
             // --- Generate NEW token with pending_approval status --- 
-            const payload = {
-                userId: user.id, 
-                email: user.email,
-                status: 'pending_approval', 
-                gender: updates.gender || user.gender // Use updated or existing gender
-            };
-            const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
+            const token = generateTokenAfterProfileUpdate(user, updates);
             // --------------------------------------------------------------
 
-            // Prepare user response (refetch might be better but use updated data for now)
-            const updatedUserData = { ...user.toJSON(), ...updates };
-            const userResponse = {
-                 id: updatedUserData.id, email: updatedUserData.email, name: updatedUserData.name, 
-                 nickname: updatedUserData.nickname, gender: updatedUserData.gender, 
-                 age: updatedUserData.age, height: updatedUserData.height, mbti: updatedUserData.mbti,
-                 profileImageUrls: updatedUserData.profileImageUrls,
-                 businessCardImageUrl: updatedUserData.businessCardImageUrl, 
-                 status: updatedUserData.status, city: updatedUserData.city
-            };
+            // Prepare user response
+            const userResponse = prepareUserResponse(user, updates);
 
             // Send success response
             res.status(200).json({ 
@@ -676,38 +521,6 @@ router.post(
         }
     }
 );
-
-// --- Swagger Schema Definition (Add this later in server.ts or a dedicated file) ---
-/**
- * @swagger
- * components:
- *   schemas:
- *     UserProfile:
- *       type: object
- *       properties:
- *         id: { type: integer, readOnly: true }
- *         email: { type: string, format: email, readOnly: true }
- *         name: { type: string }
- *         dob: { type: string, format: date }
- *         age: { type: integer, readOnly: true }
- *         weight: { type: number, format: float, nullable: true }
- *         phone: { type: string, nullable: true }
- *         address1: { type: string, nullable: true }
- *         address2: { type: string, nullable: true }
- *         occupation: { type: string, nullable: true }
- *         income: { type: string, nullable: true }
- *         profilePictureUrl: { type: string, nullable: true }
- *         createdAt: { type: string, format: date-time, readOnly: true }
- *         updatedAt: { type: string, format: date-time, readOnly: true }
- *   securitySchemes:
- *      bearerAuth:
- *          type: http
- *          scheme: bearer
- *          bearerFormat: JWT
- */
-// -----------------------------------------------------------------------------------
-
-export default router; 
 
 /**
  * @swagger
@@ -772,25 +585,8 @@ router.post(
             }
 
             // --- Validation ---
-            const { age, height, mbti, gender, city, nickname } = req.body;
-            const errors: string[] = [];
+            const errors = validateProfileUpdate(req.body, files, false);
             
-            // For updates, validate only fields that are present in the request
-            if (nickname !== undefined && nickname.trim() === '') errors.push('Nickname cannot be empty if provided.');
-            if (age !== undefined && (isNaN(parseInt(age)) || parseInt(age) < 19)) errors.push('Age must be a valid number (19+) if provided.');
-            if (height !== undefined && (isNaN(parseInt(height)) || parseInt(height) < 100)) errors.push('Height must be a valid number (>= 100cm) if provided.');
-            if (mbti !== undefined && !/^[EI][SN][TF][JP]$/i.test(mbti)) errors.push('MBTI must be 4 valid letters if provided.');
-            if (gender !== undefined && !['male', 'female'].includes(gender.toLowerCase())) errors.push('Gender must be male or female if provided.');
-            if (city !== undefined && !['seoul', 'busan', 'jeju'].includes(city.toLowerCase())) errors.push('City must be seoul, busan, or jeju if provided.');
-            
-            // Common file validation (max count)
-            if (files?.profilePictures && files.profilePictures.length > 3) {
-                 errors.push('Maximum 3 profile pictures allowed.');
-            }
-            if (files?.businessCard && files.businessCard.length > 1) {
-                 errors.push('Only one business card image allowed.');
-            }
-
             if (errors.length > 0) {
                  console.warn(`[update] Validation failed for user ${userId}:`, errors);
                  res.status(400).json({ message: 'Validation failed', errors });
@@ -798,178 +594,48 @@ router.post(
             }
             // --- End Validation ---
             
-            // ----- Supabase Upload and Deletion Logic ----- 
-            let uploadedProfileUrls: string[] = user.profileImageUrls || []; // Keep existing if no new files
-            let uploadedBusinessCardUrl: string | null = user.businessCardImageUrl || null; // Keep existing
-            const profileImageFolder = `profiles/${userId}`;
-            const businessCardFolder = `business_cards/${userId}`;
-            
-            // -- Function to delete old files from Supabase --
-            const deleteSupabaseFile = async (filePath: string) => {
-                 if (!filePath) return;
-                 // Extract the path after the bucket name from the public URL
-                 const urlParts = filePath.split('/profile-images/');
-                 if (urlParts.length < 2) {
-                     console.warn(`[Supabase Delete] Could not parse file path from URL: ${filePath}`);
-                     return;
-                 }
-                 const supabasePath = urlParts[1];
-                 console.log(`[Supabase Delete] Deleting old file: ${supabasePath}`);
-                 try {
-                     const { error: deleteError } = await supabaseAdmin.storage
-                         .from('profile-images')
-                         .remove([supabasePath]);
-                     if (deleteError) {
-                         console.error(`[Supabase Delete] Error deleting file ${supabasePath}:`, deleteError);
-                         // Log error but continue, don't block the update
-                     }
-                 } catch (e) {
-                      console.error(`[Supabase Delete] Exception deleting file ${supabasePath}:`, e);
-                 }
-            };
-            // ----------------------------------------------
+            // ----- File Upload Processing ----- 
+            let uploadedProfileUrls = user.profileImageUrls || []; // 기본값
+            let uploadedBusinessCardUrl = user.businessCardImageUrl || null; // 기본값
 
-            // Upload NEW Profile Pictures (if provided)
+            // Process Profile Images (모두 교체)
             if (files?.profilePictures && files.profilePictures.length > 0) {
-                 console.log(`[Supabase Upload] Processing profile pictures for user ${userId}...`);
-                 // 기존 이미지 삭제
-                 if (user.profileImageUrls && Array.isArray(user.profileImageUrls)) {
-                     for (const url of user.profileImageUrls) {
-                         await deleteSupabaseFile(url);
-                     }
-                 }
-                 
-                 // 업로드 직전에 새로운 Supabase 클라이언트 초기화
-                 console.log('[Supabase Upload] 새로운 Supabase 클라이언트 초기화 중...');
-                 const freshSupabase = createClient(
-                     SUPABASE_URL || '',
-                     SUPABASE_SERVICE_KEY || '',
-                     {
-                         auth: {
-                             persistSession: false,
-                             autoRefreshToken: true
-                         }
-                     }
-                 );
-                 console.log('[Supabase Upload] 새로운 클라이언트 초기화 완료');
-                 
-                 // 새 이미지 업로드
-                 uploadedProfileUrls = [];  // 기존 이미지 전부 교체
-                 
-                 for (const file of files.profilePictures) {
-                     const fileName = `${uuidv4()}-${file.originalname}`;
-                     const filePath = `${profileImageFolder}/${fileName}`;
-                     console.log(`[Supabase Upload] Uploading new profile picture: ${filePath}`);
-                     try {
-                         console.log(`[Supabase Upload Debug] 업로드 시작 - 버퍼 크기: ${file.buffer.length} 바이트, MIME 타입: ${file.mimetype}`);
-                         
-                         const { data: uploadResult, error: uploadError } = await freshSupabase.storage
-                             .from('profile-images')
-                             .upload(filePath, file.buffer, { contentType: file.mimetype, upsert: false });
-                         
-                         console.log(`[Supabase Upload Debug] 업로드 응답 - 성공: ${!uploadError}, 데이터: ${JSON.stringify(uploadResult || {})}`);
-                         
-                         if (uploadError) {
-                             console.error(`[Supabase Upload Error] 세부정보:`, { 
-                                 message: uploadError.message,
-                                 name: uploadError.name
-                             });
-                             throw new Error(`Failed to upload profile picture: ${uploadError.message}`);
-                         }
-                         
-                         console.log(`[Supabase URL] Public URL 요청 시작 - 경로: ${filePath}`);
-                         const { data: urlData } = freshSupabase.storage.from('profile-images').getPublicUrl(filePath);
-                         console.log(`[Supabase URL] Public URL 응답 - 성공: true, URL: ${urlData?.publicUrl || '없음'}`);
-                         
-                         if (!urlData || !urlData.publicUrl) {
-                             console.error(`[Supabase URL Error] Public URL을 가져올 수 없음:`, '알 수 없는 오류');
-                             throw new Error(`Failed to get public URL for profile picture.`);
-                         }
-                         uploadedProfileUrls.push(urlData.publicUrl);
-                         console.log(`[Supabase Upload] New profile picture uploaded: ${urlData.publicUrl}`);
-                     } catch (e: any) {
-                         console.error(`[Supabase Exception] 업로드 중 예외 발생:`, e.message, e.stack);
-                         throw e;
-                     }
-                 }
+                uploadedProfileUrls = await processProfileImages(
+                    userId,
+                    files.profilePictures,
+                    user.profileImageUrls,
+                    false // 기존 이미지 삭제
+                );
             }
 
-            // Upload NEW Business Card (if provided)
+            // Process Business Card
             if (files?.businessCard && files.businessCard.length > 0) {
-                 console.log(`[Supabase Upload] Deleting old business card for user ${userId}...`);
-                 // Delete old business card before uploading new one
-                 await deleteSupabaseFile(user.businessCardImageUrl);
-
-                 // 업로드 직전에 새로운 Supabase 클라이언트 초기화
-                 const freshSupabase = createClient(
-                     SUPABASE_URL || '',
-                     SUPABASE_SERVICE_KEY || '',
-                     {
-                         auth: {
-                             persistSession: false,
-                             autoRefreshToken: true
-                         }
-                     }
-                 );
-                 
-                 const businessCardFile = files.businessCard[0];
-                 const businessCardFileName = `${uuidv4()}-${businessCardFile.originalname}`;
-                 const businessCardFilePath = `${businessCardFolder}/${businessCardFileName}`;
-                 console.log(`[Supabase Upload] Uploading new business card: ${businessCardFilePath}`);
-                 const { error: cardUploadError } = await freshSupabase.storage
-                     .from('profile-images')
-                     .upload(businessCardFilePath, businessCardFile.buffer, { contentType: businessCardFile.mimetype, upsert: false });
-
-                 if (cardUploadError) throw new Error(`Failed to upload business card: ${cardUploadError.message}`);
-
-                 const { data: cardUrlData } = freshSupabase.storage.from('profile-images').getPublicUrl(businessCardFilePath);
-                 if (!cardUrlData || !cardUrlData.publicUrl) throw new Error(`Failed to get public URL for business card.`);
-                 uploadedBusinessCardUrl = cardUrlData.publicUrl;
-                 console.log(`[Supabase Upload] New business card uploaded: ${uploadedBusinessCardUrl}`);
+                uploadedBusinessCardUrl = await processBusinessCard(
+                    userId,
+                    files.businessCard[0],
+                    user.businessCardImageUrl
+                );
             }
-            // ----- End Supabase Upload Logic -----
+            // ----- End File Upload Processing -----
 
             // --- Prepare update data --- 
-            const updates: any = {};
-            if (nickname !== undefined) updates.nickname = nickname;
-            if (age !== undefined) updates.age = parseInt(age);
-            if (height !== undefined) updates.height = parseInt(height);
-            if (mbti !== undefined) updates.mbti = mbti.toUpperCase();
-            if (gender !== undefined) updates.gender = gender.toLowerCase();
-            if (city !== undefined) updates.city = city.toLowerCase();
-            // Only update URLs if new ones were uploaded
-            if (files?.profilePictures && files.profilePictures.length > 0) updates.profileImageUrls = uploadedProfileUrls;
-            if (files?.businessCard && files.businessCard.length > 0) updates.businessCardImageUrl = uploadedBusinessCardUrl;
+            const updates = prepareProfileUpdates({
+                ...req.body,
+                profileImageUrls: files?.profilePictures ? uploadedProfileUrls : undefined,
+                businessCardImageUrl: files?.businessCard ? uploadedBusinessCardUrl : undefined
+            });
             
-            // Always set status to pending_approval on update
-            updates.status = 'pending_approval';
-            updates.rejectionReason = null; // Clear rejection reason on update
-
             // --- Update user record --- 
             await user.update(updates);
             console.log(`[update] User ${userId} updated successfully. Status set to pending_approval.`);
             // ---------------------------
 
             // --- Generate NEW token with pending_approval status --- 
-            const payload = {
-                userId: user.id, 
-                email: user.email,
-                status: 'pending_approval', 
-                gender: updates.gender || user.gender // Use updated or existing gender
-            };
-            const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
+            const token = generateTokenAfterProfileUpdate(user, updates);
             // --------------------------------------------------------------
 
-            // Prepare user response (refetch might be better but use updated data for now)
-            const updatedUserData = { ...user.toJSON(), ...updates };
-            const userResponse = {
-                 id: updatedUserData.id, email: updatedUserData.email, name: updatedUserData.name, 
-                 nickname: updatedUserData.nickname, gender: updatedUserData.gender, 
-                 age: updatedUserData.age, height: updatedUserData.height, mbti: updatedUserData.mbti,
-                 profileImageUrls: updatedUserData.profileImageUrls,
-                 businessCardImageUrl: updatedUserData.businessCardImageUrl, 
-                 status: updatedUserData.status, city: updatedUserData.city
-            };
+            // Prepare user response
+            const userResponse = prepareUserResponse(user, updates);
 
             // Send success response
             res.status(200).json({ 
@@ -992,3 +658,35 @@ router.post(
         }
     }
 ); 
+
+// --- Swagger Schema Definition (Add this later in server.ts or a dedicated file) ---
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     UserProfile:
+ *       type: object
+ *       properties:
+ *         id: { type: integer, readOnly: true }
+ *         email: { type: string, format: email, readOnly: true }
+ *         name: { type: string }
+ *         dob: { type: string, format: date }
+ *         age: { type: integer, readOnly: true }
+ *         weight: { type: number, format: float, nullable: true }
+ *         phone: { type: string, nullable: true }
+ *         address1: { type: string, nullable: true }
+ *         address2: { type: string, nullable: true }
+ *         occupation: { type: string, nullable: true }
+ *         income: { type: string, nullable: true }
+ *         profilePictureUrl: { type: string, nullable: true }
+ *         createdAt: { type: string, format: date-time, readOnly: true }
+ *         updatedAt: { type: string, format: date-time, readOnly: true }
+ *   securitySchemes:
+ *      bearerAuth:
+ *          type: http
+ *          scheme: bearer
+ *          bearerFormat: JWT
+ */
+// -----------------------------------------------------------------------------------
+
+export default router; 
