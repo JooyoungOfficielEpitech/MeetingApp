@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+echo "Running backend tests before commit..."
+cd backend && npm test -- --silent || exit 1

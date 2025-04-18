@@ -10,5 +10,8 @@
     "*.{js,jsx,ts,tsx}": [
       "npm test -- --findRelatedTests"
     ]
+  },
+  "devDependencies": {
+    "husky": "^9.1.7"
   }
 }
