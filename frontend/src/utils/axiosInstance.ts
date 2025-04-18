@@ -6,7 +6,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 // Create an Axios instance
 const axiosInstance = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 10000, // Optional: Set a request timeout (e.g., 10 seconds)
+  timeout: 30000, // 10초에서 30초로 타임아웃 증가
   headers: {
     'Content-Type': 'application/json',
   },

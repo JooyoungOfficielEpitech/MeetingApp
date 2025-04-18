@@ -523,16 +523,40 @@ router.post(
                      const fileName = `${uuidv4()}-${file.originalname}`;
                      const filePath = `${profileImageFolder}/${fileName}`;
                      console.log(`[Supabase Upload] Uploading new profile picture: ${filePath}`);
-                     const { error: uploadError } = await supabaseAdmin.storage
-                         .from('profile-images')
-                         .upload(filePath, file.buffer, { contentType: file.mimetype, upsert: false });
-
-                     if (uploadError) throw new Error(`Failed to upload profile picture: ${uploadError.message}`);
-                     
-                     const { data: urlData } = supabaseAdmin.storage.from('profile-images').getPublicUrl(filePath);
-                     if (!urlData || !urlData.publicUrl) throw new Error(`Failed to get public URL for profile picture.`);
-                     uploadedProfileUrls.push(urlData.publicUrl);
-                     console.log(`[Supabase Upload] New profile picture uploaded: ${urlData.publicUrl}`);
+                     try {
+                         console.log(`[Supabase Upload Debug] 업로드 시작 - 버퍼 크기: ${file.buffer.length} 바이트, MIME 타입: ${file.mimetype}`);
+                         
+                         const { data: uploadResult, error: uploadError } = await supabaseAdmin.storage
+                             .from('profile-images')
+                             .upload(filePath, file.buffer, { contentType: file.mimetype, upsert: false });
+                         
+                         console.log(`[Supabase Upload Debug] 업로드 응답 - 성공: ${!uploadError}, 데이터: ${JSON.stringify(uploadResult || {})}`);
+                         
+                         if (uploadError) {
+                             console.error(`[Supabase Upload Error] 세부정보:`, { 
+                                 message: uploadError.message,
+                                 statusCode: uploadError.statusCode, 
+                                 details: uploadError.details,
+                                 name: uploadError.name,
+                                 status: uploadError.status
+                             });
+                             throw new Error(`Failed to upload profile picture: ${uploadError.message}`);
+                         }
+                         
+                         console.log(`[Supabase URL] Public URL 요청 시작 - 경로: ${filePath}`);
+                         const { data: urlData, error: urlError } = supabaseAdmin.storage.from('profile-images').getPublicUrl(filePath);
+                         console.log(`[Supabase URL] Public URL 응답 - 성공: ${!urlError}, URL: ${urlData?.publicUrl || '없음'}`);
+                         
+                         if (!urlData || !urlData.publicUrl) {
+                             console.error(`[Supabase URL Error] Public URL을 가져올 수 없음:`, urlError || '알 수 없는 오류');
+                             throw new Error(`Failed to get public URL for profile picture.`);
+                         }
+                         uploadedProfileUrls.push(urlData.publicUrl);
+                         console.log(`[Supabase Upload] New profile picture uploaded: ${urlData.publicUrl}`);
+                     } catch (e: any) {
+                         console.error(`[Supabase Exception] 업로드 중 예외 발생:`, e.message, e.stack);
+                         throw e;
+                     }
                  }
             }
 
@@ -654,3 +678,264 @@ router.post(
 // -----------------------------------------------------------------------------------
 
 export default router; 
+
+/**
+ * @swagger
+ * /api/profile/update:
+ *   post:
+ *     summary: Update existing user profile with file upload support
+ *     tags: [User Profile]
+ *     description: Updates user profile information including profile images and business card
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               nickname: { type: string, description: "User's nickname" }
+ *               gender: { type: string, enum: [male, female], description: "User's gender" }
+ *               city: { type: string, enum: [seoul, busan, jeju], description: "User's city" }
+ *               age: { type: string, description: "User's age" }
+ *               height: { type: string, description: "User's height in cm" }
+ *               mbti: { type: string, description: "User's MBTI personality type" }
+ *               profilePictures: { type: array, items: { type: string, format: binary }, maxItems: 3, description: "Profile pictures (up to 3)" }
+ *               businessCard: { type: string, format: binary, description: "Business card image" }
+ *     responses:
+ *       200: { description: 'Profile updated successfully', content: { application/json: { schema: { $ref: '#/components/schemas/AuthResponse' } } } }
+ *       400: { description: 'Validation errors' }
+ *       401: { description: 'Unauthorized' }
+ *       404: { description: 'User not found' }
+ *       500: { description: 'Server error' }
+ */
+// @ts-ignore // Ignore overload error for this handler
+router.post(
+    '/update',
+    authenticateToken as express.RequestHandler, 
+    upload.fields([ // Apply multer AFTER auth
+        { name: 'profilePictures', maxCount: 3 },
+        { name: 'businessCard', maxCount: 1 }
+    ]),
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+        const userId = (req as any).user?.userId;
+        const files = (req as any).files as { 
+            profilePictures?: Express.Multer.File[];
+            businessCard?: Express.Multer.File[];
+        };
+
+        console.log(`[POST /api/profile/update] Processing request for user ID: ${userId}`);
+
+        if (!userId) {
+            console.error('[update] Error: userId missing after authenticateToken.');
+            res.status(401).json({ message: 'Authentication failed: User ID not found.' });
+            return;
+        }
+
+        try {
+            const user = await User.findByPk(userId);
+            if (!user) {
+                console.error(`[update] Error: User not found for ID: ${userId}`);
+                res.status(404).json({ message: 'User associated with this token not found.' });
+                return;
+            }
+
+            // --- Validation ---
+            const { age, height, mbti, gender, city, nickname } = req.body;
+            const errors: string[] = [];
+            
+            // For updates, validate only fields that are present in the request
+            if (nickname !== undefined && nickname.trim() === '') errors.push('Nickname cannot be empty if provided.');
+            if (age !== undefined && (isNaN(parseInt(age)) || parseInt(age) < 19)) errors.push('Age must be a valid number (19+) if provided.');
+            if (height !== undefined && (isNaN(parseInt(height)) || parseInt(height) < 100)) errors.push('Height must be a valid number (>= 100cm) if provided.');
+            if (mbti !== undefined && !/^[EI][SN][TF][JP]$/i.test(mbti)) errors.push('MBTI must be 4 valid letters if provided.');
+            if (gender !== undefined && !['male', 'female'].includes(gender.toLowerCase())) errors.push('Gender must be male or female if provided.');
+            if (city !== undefined && !['seoul', 'busan', 'jeju'].includes(city.toLowerCase())) errors.push('City must be seoul, busan, or jeju if provided.');
+            
+            // Common file validation (max count)
+            if (files?.profilePictures && files.profilePictures.length > 3) {
+                 errors.push('Maximum 3 profile pictures allowed.');
+            }
+            if (files?.businessCard && files.businessCard.length > 1) {
+                 errors.push('Only one business card image allowed.');
+            }
+
+            if (errors.length > 0) {
+                 console.warn(`[update] Validation failed for user ${userId}:`, errors);
+                 res.status(400).json({ message: 'Validation failed', errors });
+                 return;
+            }
+            // --- End Validation ---
+            
+            // ----- Supabase Upload and Deletion Logic ----- 
+            let uploadedProfileUrls: string[] = user.profileImageUrls || []; // Keep existing if no new files
+            let uploadedBusinessCardUrl: string | null = user.businessCardImageUrl || null; // Keep existing
+            const profileImageFolder = `profiles/${userId}`;
+            const businessCardFolder = `business_cards/${userId}`;
+            
+            // -- Function to delete old files from Supabase --
+            const deleteSupabaseFile = async (filePath: string) => {
+                 if (!filePath) return;
+                 // Extract the path after the bucket name from the public URL
+                 const urlParts = filePath.split('/profile-images/');
+                 if (urlParts.length < 2) {
+                     console.warn(`[Supabase Delete] Could not parse file path from URL: ${filePath}`);
+                     return;
+                 }
+                 const supabasePath = urlParts[1];
+                 console.log(`[Supabase Delete] Deleting old file: ${supabasePath}`);
+                 try {
+                     const { error: deleteError } = await supabaseAdmin.storage
+                         .from('profile-images')
+                         .remove([supabasePath]);
+                     if (deleteError) {
+                         console.error(`[Supabase Delete] Error deleting file ${supabasePath}:`, deleteError);
+                         // Log error but continue, don't block the update
+                     }
+                 } catch (e) {
+                      console.error(`[Supabase Delete] Exception deleting file ${supabasePath}:`, e);
+                 }
+            };
+            // ----------------------------------------------
+
+            // Upload NEW Profile Pictures (if provided)
+            if (files?.profilePictures && files.profilePictures.length > 0) {
+                 console.log(`[Supabase Upload] Processing profile pictures for user ${userId}...`);
+                 // 기존 이미지 삭제
+                 if (user.profileImageUrls && Array.isArray(user.profileImageUrls)) {
+                     for (const url of user.profileImageUrls) {
+                         await deleteSupabaseFile(url);
+                     }
+                 }
+                 
+                 // 새 이미지 업로드
+                 uploadedProfileUrls = [];  // 기존 이미지 전부 교체
+                 
+                 for (const file of files.profilePictures) {
+                     const fileName = `${uuidv4()}-${file.originalname}`;
+                     const filePath = `${profileImageFolder}/${fileName}`;
+                     console.log(`[Supabase Upload] Uploading new profile picture: ${filePath}`);
+                     try {
+                         console.log(`[Supabase Upload Debug] 업로드 시작 - 버퍼 크기: ${file.buffer.length} 바이트, MIME 타입: ${file.mimetype}`);
+                         
+                         const { data: uploadResult, error: uploadError } = await supabaseAdmin.storage
+                             .from('profile-images')
+                             .upload(filePath, file.buffer, { contentType: file.mimetype, upsert: false });
+                         
+                         console.log(`[Supabase Upload Debug] 업로드 응답 - 성공: ${!uploadError}, 데이터: ${JSON.stringify(uploadResult || {})}`);
+                         
+                         if (uploadError) {
+                             console.error(`[Supabase Upload Error] 세부정보:`, { 
+                                 message: uploadError.message,
+                                 statusCode: uploadError.statusCode, 
+                                 details: uploadError.details,
+                                 name: uploadError.name,
+                                 status: uploadError.status
+                             });
+                             throw new Error(`Failed to upload profile picture: ${uploadError.message}`);
+                         }
+                         
+                         console.log(`[Supabase URL] Public URL 요청 시작 - 경로: ${filePath}`);
+                         const { data: urlData, error: urlError } = supabaseAdmin.storage.from('profile-images').getPublicUrl(filePath);
+                         console.log(`[Supabase URL] Public URL 응답 - 성공: ${!urlError}, URL: ${urlData?.publicUrl || '없음'}`);
+                         
+                         if (!urlData || !urlData.publicUrl) {
+                             console.error(`[Supabase URL Error] Public URL을 가져올 수 없음:`, urlError || '알 수 없는 오류');
+                             throw new Error(`Failed to get public URL for profile picture.`);
+                         }
+                         uploadedProfileUrls.push(urlData.publicUrl);
+                         console.log(`[Supabase Upload] New profile picture uploaded: ${urlData.publicUrl}`);
+                     } catch (e: any) {
+                         console.error(`[Supabase Exception] 업로드 중 예외 발생:`, e.message, e.stack);
+                         throw e;
+                     }
+                 }
+            }
+
+            // Upload NEW Business Card (if provided)
+            if (files?.businessCard && files.businessCard.length > 0) {
+                 console.log(`[Supabase Upload] Deleting old business card for user ${userId}...`);
+                 // Delete old business card before uploading new one
+                 await deleteSupabaseFile(user.businessCardImageUrl);
+
+                 const businessCardFile = files.businessCard[0];
+                 const businessCardFileName = `${uuidv4()}-${businessCardFile.originalname}`;
+                 const businessCardFilePath = `${businessCardFolder}/${businessCardFileName}`;
+                 console.log(`[Supabase Upload] Uploading new business card: ${businessCardFilePath}`);
+                 const { error: cardUploadError } = await supabaseAdmin.storage
+                     .from('profile-images')
+                     .upload(businessCardFilePath, businessCardFile.buffer, { contentType: businessCardFile.mimetype, upsert: false });
+
+                 if (cardUploadError) throw new Error(`Failed to upload business card: ${cardUploadError.message}`);
+
+                 const { data: cardUrlData } = supabaseAdmin.storage.from('profile-images').getPublicUrl(businessCardFilePath);
+                 if (!cardUrlData || !cardUrlData.publicUrl) throw new Error(`Failed to get public URL for business card.`);
+                 uploadedBusinessCardUrl = cardUrlData.publicUrl;
+                 console.log(`[Supabase Upload] New business card uploaded: ${uploadedBusinessCardUrl}`);
+            }
+            // ----- End Supabase Upload Logic -----
+
+            // --- Prepare update data --- 
+            const updates: any = {};
+            if (nickname !== undefined) updates.nickname = nickname;
+            if (age !== undefined) updates.age = parseInt(age);
+            if (height !== undefined) updates.height = parseInt(height);
+            if (mbti !== undefined) updates.mbti = mbti.toUpperCase();
+            if (gender !== undefined) updates.gender = gender.toLowerCase();
+            if (city !== undefined) updates.city = city.toLowerCase();
+            // Only update URLs if new ones were uploaded
+            if (files?.profilePictures && files.profilePictures.length > 0) updates.profileImageUrls = uploadedProfileUrls;
+            if (files?.businessCard && files.businessCard.length > 0) updates.businessCardImageUrl = uploadedBusinessCardUrl;
+            
+            // Always set status to pending_approval on update
+            updates.status = 'pending_approval';
+            updates.rejectionReason = null; // Clear rejection reason on update
+
+            // --- Update user record --- 
+            await user.update(updates);
+            console.log(`[update] User ${userId} updated successfully. Status set to pending_approval.`);
+            // ---------------------------
+
+            // --- Generate NEW token with pending_approval status --- 
+            const payload = {
+                userId: user.id, 
+                email: user.email,
+                status: 'pending_approval', 
+                gender: updates.gender || user.gender // Use updated or existing gender
+            };
+            const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
+            // --------------------------------------------------------------
+
+            // Prepare user response (refetch might be better but use updated data for now)
+            const updatedUserData = { ...user.toJSON(), ...updates };
+            const userResponse = {
+                 id: updatedUserData.id, email: updatedUserData.email, name: updatedUserData.name, 
+                 nickname: updatedUserData.nickname, gender: updatedUserData.gender, 
+                 age: updatedUserData.age, height: updatedUserData.height, mbti: updatedUserData.mbti,
+                 profileImageUrls: updatedUserData.profileImageUrls,
+                 businessCardImageUrl: updatedUserData.businessCardImageUrl, 
+                 status: updatedUserData.status, city: updatedUserData.city
+            };
+
+            // Send success response
+            res.status(200).json({ 
+                message: 'Profile updated successfully. Waiting for approval.',
+                token: token,
+                user: userResponse
+            });
+
+        } catch (error: any) {
+            console.error(`[POST /api/profile/update] Error processing request for user ${userId}:`, error);
+            // Don't cleanup files on error here, as Supabase doesn't rollback
+            if (error.name === 'SequelizeValidationError') {
+                res.status(400).json({ message: 'Database validation failed.', errors: error.errors?.map((e:any) => e.message) });
+            } else if (error.name === 'SequelizeDatabaseError') {
+                 res.status(500).json({ message: 'Database error during user update.' });
+            } else {
+                 // Handle specific Supabase upload errors or general errors
+                 res.status(500).json({ message: error.message || 'An unexpected error occurred during profile update.' });
+            }
+        }
+    }
+); 

@@ -61,6 +61,7 @@ interface ProfileUpdateResponse {
         [key: string]: any;
     };
     message?: string;
+    token?: string; // 토큰 필드 추가
 }
 
 interface ProfileFormData {
@@ -86,6 +87,8 @@ const renameFileWithUUID = (file: File): File => {
 
 // Client Component that uses useSearchParams
 function CompleteProfileContent() {
+    console.log("🚨🚨🚨 signup/complete-profile 페이지 컴포넌트 로드됨");
+    
     const router = useRouter();
     const searchParams = useSearchParams();
     const isNewUser = searchParams.get('newUser') === 'true' || searchParams.get('isNewUser') === 'true';
@@ -190,9 +193,15 @@ function CompleteProfileContent() {
 
     // Handler for profile picture selection
     const handleProfilePictureChange = (e: ChangeEvent<HTMLInputElement>) => {
+        alert("프로필 사진 선택 이벤트 발생");
+        console.log("🚨🚨🚨 handleProfilePictureChange 호출됨: ", e.target.files?.length);
+        
         if (e.target.files) {
             const newFiles = Array.from(e.target.files);
+            console.log("🚨🚨🚨 선택된 파일: ", newFiles.map(f => f.name));
+            
             const existingFiles = profilePictures; // Get current files from state
+            console.log("🚨🚨🚨 기존 파일: ", existingFiles.map(f => f.name));
 
             // Combine existing and new files
             const combinedFiles = [...existingFiles, ...newFiles];
@@ -206,6 +215,7 @@ function CompleteProfileContent() {
 
             // Update state with the combined list
             setProfilePictures(combinedFiles);
+            alert(`프로필 사진 ${newFiles.length}장이 추가되었습니다. 현재 총 ${combinedFiles.length}장`);
 
             // Generate previews for the combined list
             // Clean up *all* previous preview URLs first
@@ -215,6 +225,8 @@ function CompleteProfileContent() {
 
             // Clear the file input value after processing to allow selecting the same file again later if needed
             e.target.value = ''; 
+        } else {
+            alert("선택된 파일이 없습니다.");
         }
     };
 
@@ -318,46 +330,48 @@ function CompleteProfileContent() {
         }
         
         try {
+            // FormData 객체 생성 - 모든 케이스에서 사용
+            const formData = new FormData();
+            
+            // 기본 정보 추가
+            formData.append('nickname', data.nickname);
+            formData.append('gender', data.gender);
+            formData.append('age', data.age || '');
+            formData.append('height', data.height || '');
+            formData.append('mbti', (data.mbti || '').toUpperCase());
+            formData.append('city', data.city); // 도시 정보 추가
+            
+            // 프로필 사진 추가 (최대 3장) - UUID로 파일명 변경
+            profilePictures.forEach((file, index) => {
+                // 파일 이름을 UUID로 변경
+                const renamedFile = renameFileWithUUID(file);
+                formData.append('profilePictures', renamedFile);
+            });
+            
+            // 명함 추가 - UUID로 파일명 변경
+            if (businessCard) {
+                const renamedBusinessCard = renameFileWithUUID(businessCard);
+                formData.append('businessCard', renamedBusinessCard);
+            }
+            
+            // 디버깅을 위해 FormData 내용 출력 (FormData는 직접 출력할 수 없음)
+            console.log('[CompleteProfile] 전송할 데이터:');
+            console.log('- 닉네임:', data.nickname);
+            console.log('- 성별:', data.gender);
+            console.log('- 나이:', data.age);
+            console.log('- 키:', data.height);
+            console.log('- MBTI:', data.mbti?.toUpperCase());
+            console.log('- 프로필 사진 수:', profilePictures.length);
+            console.log('- 명함 파일:', businessCard?.name);
+            
+            let response;
+            
             // 소셜 로그인 신규 사용자인 경우 (토큰이 없는 경우)
             if (isNewUser && !localStorage.getItem('token')) {
-                console.log('[CompleteProfile] 소셜 로그인 신규 사용자 - 세션 기반 요청');
-                
-                // FormData 객체 생성
-                const formData = new FormData();
-                
-                // 기본 정보 추가
-                formData.append('nickname', data.nickname);
-                formData.append('gender', data.gender);
-                formData.append('age', data.age || '');
-                formData.append('height', data.height || '');
-                formData.append('mbti', (data.mbti || '').toUpperCase());
-                formData.append('city', data.city); // 도시 정보 추가
-                
-                // 프로필 사진 추가 (최대 3장) - UUID로 파일명 변경
-                profilePictures.forEach((file, index) => {
-                    // 파일 이름을 UUID로 변경
-                    const renamedFile = renameFileWithUUID(file);
-                    formData.append('profilePictures', renamedFile);
-                });
-                
-                // 명함 추가 - UUID로 파일명 변경
-                if (businessCard) {
-                    const renamedBusinessCard = renameFileWithUUID(businessCard);
-                    formData.append('businessCard', renamedBusinessCard);
-                }
-                
-                // 디버깅을 위해 FormData 내용 출력 (FormData는 직접 출력할 수 없음)
-                console.log('[CompleteProfile] 전송할 데이터:');
-                console.log('- 닉네임:', data.nickname);
-                console.log('- 성별:', data.gender);
-                console.log('- 나이:', data.age);
-                console.log('- 키:', data.height);
-                console.log('- MBTI:', data.mbti?.toUpperCase());
-                console.log('- 프로필 사진 수:', profilePictures.length);
-                console.log('- 명함 파일:', businessCard?.name);
+                console.log('[CompleteProfile] 소셜 로그인 신규 사용자 - complete-social 요청');
                 
                 // 백엔드에서 세션을 통해 사용자를 식별할 수 있도록 자격 증명 포함
-                const response = await axiosInstance.post<CompleteSocialResponse>('/api/auth/complete-social', formData, {
+                response = await axiosInstance.post<CompleteSocialResponse>('/api/auth/complete-social', formData, {
                     withCredentials: true, // 중요: 세션 쿠키 전송을 위해 필요
                     headers: {
                         'Content-Type': 'multipart/form-data' // 파일 업로드를 위한 헤더
@@ -382,36 +396,46 @@ function CompleteProfileContent() {
                         }
                     }
                 }
-                
-                alert('프로필 설정이 완료되었습니다!');
-                
-                // 상태에 따라 리디렉션
-                console.log('[CompleteProfile] 유저 상태:', response.data.user?.status);
-                if (response.data.user && response.data.user.status === 'pending_approval') {
-                    console.log('[CompleteProfile] 승인 대기 상태로 이동');
-                    router.replace('/auth/pending-approval');
-                } else {
-                    console.log('[CompleteProfile] 메인 페이지로 이동');
-                    router.replace('/main');
-                }
             } else {
-                // 기존 사용자 업데이트 흐름
-                const response = await axiosInstance.put<ProfileUpdateResponse>('/api/profile/me', data);
-                console.log('[CompleteProfile] 프로필 업데이트 응답:', response.data);
+                // 일반 회원가입 사용자 또는 기존 사용자 - complete-regular 사용
+                console.log('[CompleteProfile] 일반 회원가입 사용자 - complete-regular 요청');
+                
+                // 토큰이 있으면 헤더에 포함
+                const token = localStorage.getItem('token');
+                
+                // 첫 프로필 완성이면 complete-regular, 업데이트면 update
+                const endpoint = isNewUser ? '/api/profile/complete-regular' : '/api/profile/update'; 
+                console.log(`[CompleteProfile] 사용할 엔드포인트: ${endpoint}`);
+                
+                response = await axiosInstance.post<ProfileUpdateResponse>(endpoint, formData, {
+                    headers: {
+                        'Content-Type': 'multipart/form-data',
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                console.log('[CompleteProfile] 프로필 완성 응답:', response.data);
+                
+                // 응답에서 새 토큰이 있으면 갱신
+                if (response.data.token) {
+                    localStorage.setItem('token', response.data.token);
+                }
                 
                 // 상태 업데이트
-                localStorage.setItem('userGender', data.gender);
-                
-                alert('프로필 설정이 완료되었습니다!');
-                
-                // 상태 확인 후 리다이렉션
-                if (response.data && response.data.user && response.data.user.status === 'pending_approval') {
-                    console.log('[CompleteProfile] 기존 사용자 - 승인 대기 상태로 이동');
-                    router.replace('/auth/pending-approval');
-                } else {
-                    console.log('[CompleteProfile] 기존 사용자 - 메인 페이지로 이동');
-                    router.replace('/main');
+                if (response.data.user && response.data.user.gender) {
+                    localStorage.setItem('userGender', response.data.user.gender);
                 }
+            }
+            
+            alert('프로필 설정이 완료되었습니다!');
+            
+            // 상태에 따라 리디렉션
+            if (response.data.user && response.data.user.status === 'pending_approval') {
+                console.log('[CompleteProfile] 승인 대기 상태로 이동');
+                router.replace('/auth/pending-approval');
+            } else {
+                console.log('[CompleteProfile] 메인 페이지로 이동');
+                router.replace('/main');
             }
         } catch (error: any) {
             console.error('[CompleteProfile] 프로필 업데이트 오류:', error);
@@ -433,10 +457,11 @@ function CompleteProfileContent() {
     const selectBaseStyle = `${inputBaseStyle} pr-10`; // Add padding for dropdown arrow
     const labelStyle = "block text-sm font-medium text-slate-400 mb-1.5 sr-only"; // Labels hidden
     const formLabelStyle = "block text-sm font-medium text-slate-300 mb-1.5"; // Visible label for file inputs etc.
-    const buttonBaseStyle = "w-full py-3 px-4 rounded-full font-semibold transition-colors duration-200";
+    const buttonBaseStyle = "w-full py-3 px-4 rounded-full font-semibold bg-amber-500 text-white hover:bg-amber-600 focus:ring-2 focus:ring-offset-2 focus:ring-amber-500 focus:outline-none transition-colors duration-200";
+    const deleteButtonStyle = "mt-2 flex items-center justify-center space-x-1 w-full py-2 bg-red-500 hover:bg-red-600 text-white rounded-md transition-colors duration-200";
     const iconWrapperStyle = "absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none";
     // Style for file input area
-    const fileInputAreaStyle = "mt-1 flex items-center justify-center px-6 pt-5 pb-6 border-2 border-slate-600 border-dashed rounded-md hover:border-amber-500 transition-colors cursor-pointer";
+    const fileInputAreaStyle = "mt-1 flex flex-col items-center justify-center px-6 pt-5 pb-6 border-2 border-slate-600 border-dashed rounded-lg hover:border-amber-500 transition-all cursor-pointer bg-slate-800 hover:bg-slate-700";
     const fileInputLabelStyle = "relative cursor-pointer bg-slate-800 rounded-md font-medium text-amber-400 hover:text-amber-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-offset-gray-950 focus-within:ring-amber-500 px-1";
     // -----------------------------
 
@@ -604,7 +629,7 @@ function CompleteProfileContent() {
                     {/* 프로필 사진 업로드 */}
                     <div>
                         <label htmlFor="profile-pictures" className={formLabelStyle}>프로필 사진 (최대 3장)</label>
-                        <div className={fileInputAreaStyle}>
+                        <div className={`${fileInputAreaStyle} ${profilePicturePreviews.length === 0 ? 'h-36' : 'h-24'}`}>
                             <input
                                 id="profile-pictures"
                                 type="file"
@@ -614,11 +639,11 @@ function CompleteProfileContent() {
                                 onChange={handleProfilePictureChange}
                             />
                             <label htmlFor="profile-pictures" className="w-full text-center cursor-pointer">
-                                <PhotoIcon className="mx-auto h-12 w-12 text-slate-500" />
+                                <PhotoIcon className="mx-auto h-12 w-12 text-amber-500" />
                                 <span className="mt-2 block text-sm font-medium text-slate-300">
                                     사진 선택하기
                                 </span>
-                                <span className="mt-1 block text-xs text-slate-500">
+                                <span className="mt-1 block text-xs text-slate-400">
                                     PNG, JPG, GIF 최대 10MB (필수)
                                 </span>
                             </label>
@@ -626,16 +651,23 @@ function CompleteProfileContent() {
                         
                         {/* 프로필 사진 미리보기 */}
                         {profilePicturePreviews.length > 0 && (
-                            <div className="mt-4 grid grid-cols-3 gap-2">
+                            <div className="mt-4 grid grid-cols-3 gap-3">
                                 {profilePicturePreviews.map((url, index) => (
-                                    <div key={index} className="relative">
-                                        <img src={url} alt={`Preview ${index}`} className="w-full h-24 object-cover rounded-md" />
+                                    <div key={index} className="relative group">
+                                        <div className="overflow-hidden rounded-lg shadow-md aspect-square">
+                                            <img 
+                                                src={url} 
+                                                alt={`Profile ${index+1}`} 
+                                                className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" 
+                                            />
+                                        </div>
                                         <button
                                             type="button"
                                             onClick={() => handleRemoveProfilePicture(index)}
-                                            className="absolute inset-0 w-full h-full bg-black bg-opacity-50 rounded-md flex items-center justify-center text-white"
+                                            className="absolute top-2 right-2 w-7 h-7 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center text-white shadow-lg transition-transform duration-200 transform group-hover:scale-110"
+                                            aria-label="이미지 삭제"
                                         >
-                                            <XMarkIcon className="h-4 w-4" />
+                                            <XMarkIcon className="h-5 w-5" />
                                         </button>
                                     </div>
                                 ))}
@@ -646,7 +678,7 @@ function CompleteProfileContent() {
                     {/* 명함 업로드 */}
                     <div>
                         <label htmlFor="businessCard" className={formLabelStyle}>명함 또는 직업 증명 사진</label>
-                        <div className={fileInputAreaStyle}>
+                        <div className={`${fileInputAreaStyle} ${!businessCardPreview ? 'h-36' : 'h-24'}`}>
                             <input
                                 id="businessCard"
                                 type="file"
@@ -655,11 +687,11 @@ function CompleteProfileContent() {
                                 onChange={handleBusinessCardChange}
                             />
                             <label htmlFor="businessCard" className="w-full text-center cursor-pointer">
-                                <BusinessCardIcon className="mx-auto h-12 w-12 text-slate-500" />
+                                <BusinessCardIcon className="mx-auto h-12 w-12 text-amber-500" />
                                 <span className="mt-2 block text-sm font-medium text-slate-300">
                                     사진 선택하기
                                 </span>
-                                <span className="mt-1 block text-xs text-slate-500">
+                                <span className="mt-1 block text-xs text-slate-400">
                                     PNG, JPG, GIF 최대 10MB (필수)
                                 </span>
                             </label>
@@ -668,21 +700,41 @@ function CompleteProfileContent() {
                         {/* 명함 미리보기 */}
                         {businessCardPreview && (
                             <div className="mt-4">
-                                <img src={businessCardPreview} alt="Business Card Preview" className="w-full h-24 object-cover rounded-md" />
+                                <div className="overflow-hidden rounded-lg shadow-md">
+                                    <img 
+                                        src={businessCardPreview}
+                                        alt="명함 미리보기" 
+                                        className="w-full h-40 object-contain bg-white p-1" 
+                                    />
+                                </div>
                                 <button
                                     type="button"
                                     onClick={handleRemoveBusinessCard}
-                                    className="mt-2 w-full py-2 bg-red-500 text-white rounded-md"
+                                    className={deleteButtonStyle}
                                 >
-                                    <XMarkIcon className="h-4 w-4 mr-2" />
-                                    사진 제거하기
+                                    <XMarkIcon className="h-4 w-4" />
+                                    <span>사진 제거하기</span>
                                 </button>
                             </div>
                         )}
                     </div>
                     
-                    <button type="submit" className={buttonBaseStyle}>
-                        프로필 완성하기
+                    <button 
+                        type="submit" 
+                        className={`${buttonBaseStyle} ${loading ? 'opacity-70 cursor-not-allowed' : ''}`}
+                        disabled={loading}
+                    >
+                        {loading ? (
+                            <span className="flex items-center justify-center">
+                                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                처리 중...
+                            </span>
+                        ) : (
+                            '프로필 완성하기'
+                        )}
                     </button>
                 </form>
             </div>

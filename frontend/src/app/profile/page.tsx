@@ -63,12 +63,25 @@ const renameFileWithUUID = (file: File): File => {
   // UUID 생성 및 확장자와 결합
   const newFileName = `${uuidv4()}.${fileExtension}`;
   
+  console.log(`[파일 이름 변경] 원본: ${file.name}, 새 이름: ${newFileName}, 타입: ${file.type}, 크기: ${file.size} 바이트`);
+  
   // 새 파일 이름으로 파일 객체 생성 (타입, 내용 유지)
-  return new File([file], newFileName, { type: file.type });
+  const renamedFile = new File([file], newFileName, { type: file.type });
+  console.log(`[파일 이름 변경] 변경 완료:`, {
+    name: renamedFile.name,
+    type: renamedFile.type,
+    size: renamedFile.size,
+    lastModified: renamedFile.lastModified
+  });
+  
+  return renamedFile;
 };
 
 // --- Inner component using hooks ---
 function ProfileContent() {
+    console.log("🚨🚨🚨 프로필 페이지 컴포넌트 로드됨");
+    alert("프로필 페이지가 로드되었습니다. 콘솔 로그를 확인하세요.");
+    
     const router = useRouter();
     const searchParams = useSearchParams(); // Get search params
     const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -86,6 +99,36 @@ function ProfileContent() {
     const [uploadedProfileImages, setUploadedProfileImages] = useState<File[]>([]);
     const [profileImagePreviews, setProfileImagePreviews] = useState<string[]>([]);
     const profileInputRef = useRef<HTMLInputElement>(null);
+
+    // 디버깅을 위한 useEffect 추가
+    useEffect(() => {
+        console.log("🚨🚨🚨 ProfileContent 컴포넌트가 마운트되었습니다");
+        
+        // 브라우저에서 전역 함수로 노출시켜 콘솔에서 직접 테스트 가능하게 함
+        // @ts-ignore
+        window.debugProfileImages = {
+            showCurrentImages: () => {
+                console.log("현재 이미지 상태:", {
+                    uploadedImages: uploadedProfileImages,
+                    previewUrls: profileImagePreviews,
+                });
+                return "이미지 정보가 콘솔에 출력되었습니다.";
+            },
+            addTestImage: () => {
+                // 테스트용 이미지 URL 추가
+                const testUrl = "https://via.placeholder.com/150";
+                setProfileImagePreviews(prev => [...prev, testUrl]);
+                console.log("테스트 이미지 URL이 추가되었습니다:", testUrl);
+                return "테스트 이미지가 추가되었습니다.";
+            }
+        };
+        
+        return () => {
+            console.log("🚨🚨🚨 ProfileContent 컴포넌트가 언마운트되었습니다");
+            // @ts-ignore
+            delete window.debugProfileImages;
+        };
+    }, []);
 
     // --- Wrap fetchUserProfile in useCallback ---
     const fetchUserProfile = useCallback(async (token: string | null) => {
@@ -106,7 +149,7 @@ function ProfileContent() {
             if (response.status === 401 || response.status === 403) {
                 localStorage.removeItem('token');
                 localStorage.removeItem('user');
-                router.push('/login');
+                router.push('/');
                 return;
             }
 
@@ -268,8 +311,16 @@ function ProfileContent() {
 
     // Handle profile image upload
     const handleProfileImageUpload = (e: ChangeEvent<HTMLInputElement>) => {
+        console.log("🔴🔴🔴 [이미지 업로드] 파일 선택 이벤트 발생:", e.target.files?.length);
+        
         if (e.target.files) {
             const newFiles = Array.from(e.target.files);
+            console.log("🔴🔴🔴 [이미지 업로드] 선택된 파일 정보:", newFiles.map(f => ({
+                name: f.name,
+                type: f.type,
+                size: f.size,
+                lastModified: f.lastModified
+            })));
             
             // 기존 파일과 합쳐서 최대 3개까지만 허용
             const combinedFiles = [...uploadedProfileImages, ...newFiles];
@@ -279,19 +330,36 @@ function ProfileContent() {
             }
             
             // 파일 이름 UUID로 변경
-            const renamedFiles = newFiles.map(file => renameFileWithUUID(file));
+            const renamedFiles = newFiles.map(file => {
+                const renamed = renameFileWithUUID(file);
+                console.log(`🔴🔴🔴 [이미지 업로드] 파일 이름 변경: ${file.name} -> ${renamed.name}`);
+                return renamed;
+            });
+            
             const updatedFiles = [...uploadedProfileImages, ...renamedFiles];
+            console.log("🔴🔴🔴 [이미지 업로드] 업데이트된 파일 목록:", updatedFiles.map(f => f.name));
             setUploadedProfileImages(updatedFiles);
             
             // 미리보기 URL 생성
             // 기존 미리보기 URL은 유지하고 새 이미지에 대한 미리보기만 추가
-            const newPreviewUrls = newFiles.map(file => URL.createObjectURL(file));
-            setProfileImagePreviews([...profileImagePreviews, ...newPreviewUrls]);
+            const newPreviewUrls = newFiles.map(file => {
+                const url = URL.createObjectURL(file);
+                console.log(`🔴🔴🔴 [이미지 업로드] 미리보기 URL 생성: ${url} (${file.name})`);
+                return url;
+            });
+            
+            setProfileImagePreviews(prev => {
+                const updated = [...prev, ...newPreviewUrls];
+                console.log("🔴🔴🔴 [이미지 업로드] 미리보기 URL 목록 업데이트:", updated.length);
+                return updated;
+            });
             
             // 입력 필드 초기화
             if (e.target.value) {
                 e.target.value = '';
             }
+        } else {
+            console.log("🔴🔴🔴 [이미지 업로드] 파일이 선택되지 않음");
         }
     };
 
@@ -315,10 +383,46 @@ function ProfileContent() {
 
     // Handle saving profile changes
     const handleSave = async (e: FormEvent) => {
+        console.log("🚨🚨🚨 프로필 저장 시작 - 폼 제출됨");
         e.preventDefault();
         if (isSaving) return; // Prevent duplicate submissions
         setIsSaving(true);
         setError(null);
+
+        console.log("🚨🚨🚨 현재 이미지 상태:", { 
+            업로드대기: uploadedProfileImages.length, 
+            "파일명": uploadedProfileImages.map(f => f.name),
+            미리보기: profileImagePreviews.length 
+        });
+
+        // 유효성 검사 추가
+        const isFirstCompletion = userProfile?.status === 'pending_profile';
+        console.log("🔴🔴🔴 [프로필 저장] 첫 프로필 작성 여부:", isFirstCompletion, "현재 상태:", userProfile?.status);
+        
+        const errors: string[] = [];
+        
+        // 기본 필드 검사
+        if (!formData.nickname || formData.nickname.trim() === '') 
+            errors.push('닉네임은 필수입니다.');
+        if (!formData.gender) 
+            errors.push('성별은 필수입니다.');
+        if (!formData.city) 
+            errors.push('도시는 필수입니다.');
+        
+        // 이미지 업로드 검사 - 첫 프로필 작성 시에만 필수
+        console.log("🔴🔴🔴 [프로필 저장] 이미지 현황 - 업로드 대기: ", uploadedProfileImages.length, "미리보기: ", profileImagePreviews.length);
+        
+        if (isFirstCompletion && profileImagePreviews.length === 0 && uploadedProfileImages.length === 0) {
+            errors.push('첫 프로필 작성 시 최소 한 장의 프로필 이미지가 필요합니다.');
+            console.log("🔴🔴🔴 [프로필 저장] 이미지 부족 오류 발생!");
+        }
+        
+        if (errors.length > 0) {
+            console.log("🔴🔴🔴 [프로필 저장] 유효성 검사 실패:", errors);
+            setError(errors.join('\n'));
+            setIsSaving(false);
+            return;
+        }
 
         // FormData 객체 생성하여 이미지와 기본 정보 함께 전송
         const formDataToSend = new FormData();
@@ -339,19 +443,71 @@ function ProfileContent() {
         if (formData.occupation) formDataToSend.append('occupation', formData.occupation);
         if (formData.income) formDataToSend.append('income', formData.income);
         
+        // 디버깅을 위한 로그 추가
+        console.log('🔴🔴🔴 [프로필 저장] 이미지 파일 수:', uploadedProfileImages.length);
+        
         // 새로 업로드한 프로필 이미지가 있는 경우 추가
         if (uploadedProfileImages.length > 0) {
-            uploadedProfileImages.forEach(file => {
+            uploadedProfileImages.forEach((file, index) => {
+                console.log(`🔴🔴🔴 [프로필 저장] 이미지 ${index+1} 추가:`, file.name, file.size, file.type);
                 formDataToSend.append('profilePictures', file);
+                
+                // 디버깅용: 파일이 제대로 추가되었는지 확인
+                alert(`이미지 ${index+1} 추가됨: ${file.name} (${Math.round(file.size/1024)}KB)`);
             });
+        } else {
+            console.log('🔴🔴🔴 [프로필 저장] 업로드할 새 이미지 없음 - 미리보기만 있을 수 있음');
+            alert('업로드할 이미지가 없습니다! 이미지를 선택해주세요.');
+            
+            // 이미지가 없으면 저장 중단 (첫 프로필 작성 시에만)
+            if (isFirstCompletion) {
+                setIsSaving(false);
+                setError('첫 프로필 작성 시에는 이미지가 필수입니다.');
+                return;
+            }
+        }
+        
+        // FormData 디버깅
+        console.log('🔴🔴🔴 [프로필 저장] FormData 키 목록:');
+        for (const key of formDataToSend.keys()) {
+            const values = formDataToSend.getAll(key);
+            console.log(`- ${key}: ${values.length}개 항목`);
+            if (key !== 'profilePictures') {
+                console.log(`  값: ${values.join(', ')}`);
+            } else {
+                console.log(`  파일 이름: ${values.map((v: any) => v.name).join(', ')}`);
+            }
         }
 
         try {
+            console.log('🔴🔴🔴 [프로필 저장] 프로필 업데이트 API 요청 시작 (multipart/form-data)');
+            
+            // FormData 검증
+            let hasImages = false;
+            for (const entry of formDataToSend.entries()) {
+                if (entry[0] === 'profilePictures') {
+                    hasImages = true;
+                    break;
+                }
+            }
+            
+            if (!hasImages && isFirstCompletion) {
+                alert('FormData에 이미지가 없습니다! 저장이 중단됩니다.');
+                setIsSaving(false);
+                setError('FormData에 이미지가 없습니다. 다시 시도해주세요.');
+                return;
+            }
+            
+            // FormData 검증 통과 후 전송
+            alert(`프로필 저장을 시작합니다.${hasImages ? ' 이미지 포함' : ' 이미지 없음'}`);
+            
             const response = await axiosInstance.post('/api/profile/complete-regular', formDataToSend, {
                 headers: {
                     'Content-Type': 'multipart/form-data'
                 }
             });
+            console.log('🔴🔴🔴 [프로필 저장] 프로필 업데이트 응답 상태:', response.status);
+            console.log('🔴🔴🔴 [프로필 저장] 프로필 업데이트 응답 데이터:', response.data);
 
             if (response.status === 200) {
                 // 프로필 업데이트 성공
@@ -685,6 +841,8 @@ function ProfileContent() {
 
                         <div className="mt-8">
                             <label htmlFor="profile-images" className="block text-lg font-medium text-amber-400 mb-3">프로필 사진 (최대 3장)</label>
+                            
+                            {/* 이미지 미리보기 */}
                             <div className="grid grid-cols-3 gap-4 mb-4">
                                 {profileImagePreviews.map((preview, index) => (
                                     <div key={index} className="relative rounded-lg overflow-hidden h-32 bg-gray-700">
@@ -696,7 +854,10 @@ function ProfileContent() {
                                         />
                                         <button 
                                             type="button"
-                                            onClick={() => handleRemoveProfileImage(index)}
+                                            onClick={() => {
+                                                alert(`이미지 ${index+1}을 삭제합니다`);
+                                                handleRemoveProfileImage(index);
+                                            }}
                                             className="absolute top-2 right-2 bg-red-600 rounded-full p-1 text-white hover:bg-red-700"
                                         >
                                             <XMarkIcon className="h-5 w-5" />
@@ -720,30 +881,46 @@ function ProfileContent() {
                                 ))}
                             </div>
                             
-                            <input
-                                ref={profileInputRef}
-                                id="profile-images"
-                                type="file"
-                                accept="image/*"
-                                multiple
-                                className="sr-only" // 화면에 보이지 않게
-                                onChange={handleProfileImageUpload}
-                            />
-                            
-                            <button
-                                type="button"
-                                onClick={() => profileInputRef.current?.click()}
-                                className="mt-2 py-2 px-4 bg-gray-700 rounded-md text-white hover:bg-gray-600 flex items-center justify-center w-full"
-                                disabled={profileImagePreviews.length >= 3}
-                            >
-                                <PhotoIcon className="h-5 w-5 mr-2" />
-                                {profileImagePreviews.length === 0 ? '프로필 사진 추가' : '사진 추가하기'} 
-                                {profileImagePreviews.length >= 3 && ' (최대 3장)'}
-                            </button>
-                            
-                            <p className="text-sm text-gray-400 mt-2">
-                                * 첫 번째 사진이 메인 프로필 사진으로 사용됩니다.
-                            </p>
+                            {/* 새로운 직접 보이는 파일 입력 */}
+                            <div className="border-2 border-dashed border-gray-600 rounded-lg p-4 bg-gray-800">
+                                <p className="text-sm text-amber-400 mb-2">직접 파일 선택:</p>
+                                <input
+                                    type="file"
+                                    accept="image/*"
+                                    multiple
+                                    className="w-full text-sm text-gray-300"
+                                    onChange={(e) => {
+                                        alert(`파일 선택됨: ${e.target.files?.length}개`);
+                                        console.log("🚨🚨🚨 파일 선택됨:", e.target.files?.length);
+                                        if (e.target.files && e.target.files.length > 0) {
+                                            const files = Array.from(e.target.files);
+                                            console.log("🚨🚨🚨 선택된 파일들:", files.map(f => f.name).join(", "));
+                                            
+                                            // 기존 이미지와 새 이미지의 합이 3개를 초과하는지 확인
+                                            if (profileImagePreviews.length + files.length > 3) {
+                                                alert(`프로필 사진은 최대 3장까지만 가능합니다. 현재 ${profileImagePreviews.length}장이 있어 ${3-profileImagePreviews.length}장만 더 추가할 수 있습니다.`);
+                                                return;
+                                            }
+                                            
+                                            // 간단한 처리로 변경
+                                            setUploadedProfileImages(prev => [...prev, ...files]);
+                                            
+                                            // 미리보기 URL 생성
+                                            const urls = files.map(file => URL.createObjectURL(file));
+                                            setProfileImagePreviews(prev => [...prev, ...urls]);
+                                            
+                                            alert(`파일 ${files.length}개가 추가되었습니다!`);
+                                        }
+                                    }}
+                                />
+                                <p className="text-xs text-gray-400 mt-2">* 최대 3장까지 업로드 가능, 첫 번째 사진이 메인 이미지로 사용됩니다.</p>
+                            </div>
+
+                            <div className="text-xs text-gray-500 mt-1">
+                                업로드된 이미지: {uploadedProfileImages.length}개, 
+                                미리보기: {profileImagePreviews.length}개, 
+                                상태: {userProfile?.status || '정보 없음'}
+                            </div>
                         </div>
 
                         <div className="flex justify-end mt-8 space-x-3">

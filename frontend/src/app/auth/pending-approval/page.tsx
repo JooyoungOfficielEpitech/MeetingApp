@@ -111,11 +111,27 @@ export default function PendingApprovalPage() {
         <p className="text-slate-400">
           You can check back later by trying to log in again.
         </p>
-        <Link href="/" legacyBehavior>
-            <a className={secondaryButtonStyle}>
-                Return to Login
-            </a>
-        </Link>
+        <button 
+          onClick={() => {
+            // 로그아웃 처리
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            localStorage.removeItem('userId');
+            localStorage.removeItem('userGender');
+            
+            // 소켓 연결 종료
+            if (socketRef.current && socketRef.current.connected) {
+              socketRef.current.disconnect();
+              socketRef.current = null;
+            }
+            
+            // 로그인 페이지로 이동
+            router.push('/');
+          }}
+          className={secondaryButtonStyle}
+        >
+          Return to Login
+        </button>
       </div>
     </div>
   );
