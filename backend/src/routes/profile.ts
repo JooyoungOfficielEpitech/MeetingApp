@@ -535,20 +535,17 @@ router.post(
                          if (uploadError) {
                              console.error(`[Supabase Upload Error] 세부정보:`, { 
                                  message: uploadError.message,
-                                 statusCode: uploadError.statusCode, 
-                                 details: uploadError.details,
-                                 name: uploadError.name,
-                                 status: uploadError.status
+                                 name: uploadError.name
                              });
                              throw new Error(`Failed to upload profile picture: ${uploadError.message}`);
                          }
                          
                          console.log(`[Supabase URL] Public URL 요청 시작 - 경로: ${filePath}`);
-                         const { data: urlData, error: urlError } = supabaseAdmin.storage.from('profile-images').getPublicUrl(filePath);
-                         console.log(`[Supabase URL] Public URL 응답 - 성공: ${!urlError}, URL: ${urlData?.publicUrl || '없음'}`);
+                         const { data: urlData } = supabaseAdmin.storage.from('profile-images').getPublicUrl(filePath);
+                         console.log(`[Supabase URL] Public URL 응답 - 성공: true, URL: ${urlData?.publicUrl || '없음'}`);
                          
                          if (!urlData || !urlData.publicUrl) {
-                             console.error(`[Supabase URL Error] Public URL을 가져올 수 없음:`, urlError || '알 수 없는 오류');
+                             console.error(`[Supabase URL Error] Public URL을 가져올 수 없음:`, '알 수 없는 오류');
                              throw new Error(`Failed to get public URL for profile picture.`);
                          }
                          uploadedProfileUrls.push(urlData.publicUrl);
@@ -828,20 +825,17 @@ router.post(
                          if (uploadError) {
                              console.error(`[Supabase Upload Error] 세부정보:`, { 
                                  message: uploadError.message,
-                                 statusCode: uploadError.statusCode, 
-                                 details: uploadError.details,
-                                 name: uploadError.name,
-                                 status: uploadError.status
+                                 name: uploadError.name
                              });
                              throw new Error(`Failed to upload profile picture: ${uploadError.message}`);
                          }
                          
                          console.log(`[Supabase URL] Public URL 요청 시작 - 경로: ${filePath}`);
-                         const { data: urlData, error: urlError } = supabaseAdmin.storage.from('profile-images').getPublicUrl(filePath);
-                         console.log(`[Supabase URL] Public URL 응답 - 성공: ${!urlError}, URL: ${urlData?.publicUrl || '없음'}`);
+                         const { data: urlData } = supabaseAdmin.storage.from('profile-images').getPublicUrl(filePath);
+                         console.log(`[Supabase URL] Public URL 응답 - 성공: true, URL: ${urlData?.publicUrl || '없음'}`);
                          
                          if (!urlData || !urlData.publicUrl) {
-                             console.error(`[Supabase URL Error] Public URL을 가져올 수 없음:`, urlError || '알 수 없는 오류');
+                             console.error(`[Supabase URL Error] Public URL을 가져올 수 없음:`, '알 수 없는 오류');
                              throw new Error(`Failed to get public URL for profile picture.`);
                          }
                          uploadedProfileUrls.push(urlData.publicUrl);
