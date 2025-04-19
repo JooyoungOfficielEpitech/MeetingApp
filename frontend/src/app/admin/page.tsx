@@ -15,8 +15,8 @@ const inter = Inter({ subsets: ['latin'] });
 // Interface for the fetched recent match data from backend
 interface FetchedRecentMatch {
   matchId: string;
-  user1: { id: number; name: string; gender: string | null; } | null;
-  user2: { id: number; name: string; gender: string | null; } | null;
+  user1: { id: number; name: string; nickname?: string | null; gender: string | null; } | null;
+  user2: { id: number; name: string; nickname?: string | null; gender: string | null; } | null;
   status: string;
   createdAt: string;
 }
@@ -222,11 +222,11 @@ export default function AdminDashboardPage() {
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-slate-200 truncate">
                           <span className={getNameColorClass(match.user1 ? match.user1.gender : null)}>
-                            {match.user1?.name || 'N/A'}
+                            {match.user1?.nickname || match.user1?.name || 'N/A'}
                           </span>
                           <span> & </span> 
                           <span className={getNameColorClass(match.user2 ? match.user2.gender : null)}>
-                            {match.user2?.name || 'N/A'}
+                            {match.user2?.nickname || match.user2?.name || 'N/A'}
                           </span>
                         </p>
                         <p className="text-xs text-slate-400 truncate">ID: {match.matchId}</p>

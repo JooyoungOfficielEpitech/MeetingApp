@@ -9,6 +9,7 @@ import styles from './AdminTierPage.module.css';
 interface User {
     id: number;
     name: string;
+    nickname?: string | null;
     email: string;
     gender: 'male' | 'female' | 'other' | null; // Allow other gender
     status: 'pending_approval' | 'active' | 'rejected' | 'suspended'; // Add suspended status
@@ -301,7 +302,7 @@ const AdminTierPage: React.FC = () => {
             <div className="mb-4">
                  <input
                     type="text"
-                    placeholder="Search by name or email..."
+                    placeholder="Search by nickname or email..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     className={styles.inputStyle}
@@ -366,9 +367,9 @@ const AdminTierPage: React.FC = () => {
                     {/* ★ Replace Grid with Table ★ */}
                     <div className="overflow-x-auto shadow-md rounded-lg bg-gray-950"> 
                         <table className="min-w-full divide-y divide-slate-700">
-                            <thead className="bg-gray-900">
+                            <thead className="bg-gray-800">
                                 <tr>
-                                    <th scope="col" className={tableHeaderStyle}>User</th>
+                                    <th scope="col" className={tableHeaderStyle}>닉네임</th>
                                     <th scope="col" className={tableHeaderStyle}>Email</th>
                                     <th scope="col" className={tableHeaderStyle}>Gender</th>
                                     <th scope="col" className={tableHeaderStyle}>Status</th>
@@ -380,7 +381,7 @@ const AdminTierPage: React.FC = () => {
                                 {users.length > 0 ? (
                                     users.map((user) => (
                                         <tr key={user.id}>
-                                            <td className={tableCellStyle}>{user.name}</td>
+                                            <td className={tableCellStyle}>{user.nickname || user.name || '-'}</td>
                                             <td className={tableCellStyle}>{user.email}</td>
                                             <td className={tableCellStyle}>{user.gender || '-'}</td>
                                             <td className={tableCellStyle}>
@@ -428,7 +429,7 @@ const AdminTierPage: React.FC = () => {
                     <Modal isOpen={isModalOpen} onClose={handleCloseModal}>
                         {selectedUser && (
                             <div className={styles.modalBody}>
-                                <h2>User Details - {selectedUser.name} (ID: {selectedUser.id})</h2>
+                                <h2>User Details - {selectedUser.nickname || selectedUser.name || 'Unknown'} (ID: {selectedUser.id})</h2>
                                 
                                 {isLoadingDetails && <p>Loading details...</p>}
                                 {detailError && <p className={`${styles.error} ${styles.modalError}`}>{detailError}</p>}
@@ -438,7 +439,8 @@ const AdminTierPage: React.FC = () => {
                                         {/* Basic Info */}
                                         <div className={styles.detailSection}>
                                             <h4>Basic Info</h4>
-                                            <p><strong>Name:</strong> {detailedUser.name}</p>
+                                            <p><strong>Nickname:</strong> {detailedUser.nickname || '-'}</p>
+                                            <p><strong>Name:</strong> {detailedUser.name || '-'}</p>
                                             <p><strong>Email:</strong> {detailedUser.email}</p>
                                             <p><strong>Gender:</strong> {detailedUser.gender || '-'}</p>
                                             <p><strong>Age:</strong> {detailedUser.age ?? '-'}</p>

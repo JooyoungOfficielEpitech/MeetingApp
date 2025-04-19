@@ -58,7 +58,6 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: true,
       comment: '사용자의 닉네임'
     },
-    dob: DataTypes.DATEONLY,
     age: DataTypes.INTEGER,
     height: {
       type: DataTypes.INTEGER,
@@ -77,12 +76,7 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.STRING,
       allowNull: true,
     },
-    weight: DataTypes.FLOAT,
-    phone: DataTypes.STRING,
-    address1: DataTypes.STRING,
-    address2: DataTypes.STRING,
     occupation: DataTypes.STRING,
-    income: DataTypes.STRING,
     profilePictureUrl: DataTypes.STRING,
     profileImageUrls: {
       type: DataTypes.JSON,
@@ -109,6 +103,12 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.TEXT,
       allowNull: true,
       comment: 'Reason for profile rejection by admin'
+    },
+    credit: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+      comment: '사용자 크레딧 (초기값: 0)'
     },
     deletedAt: {
       type: DataTypes.DATE,

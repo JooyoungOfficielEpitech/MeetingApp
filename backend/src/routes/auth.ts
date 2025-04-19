@@ -388,6 +388,7 @@ router.post('/login',
                  id: user.id,
                  email: user.email,
                  name: user.name,
+                 nickname: user.nickname, // nickname 추가
                  // Add other non-sensitive fields if needed
             };
             res.json({ 

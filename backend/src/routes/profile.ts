@@ -86,7 +86,6 @@ router.get('/me', authenticateToken, async (req: Request, res: Response, next: N
                 'name',
                 'nickname',
                 'gender',
-                'dob',
                 'age',
                 'height',
                 'mbti',
@@ -95,7 +94,8 @@ router.get('/me', authenticateToken, async (req: Request, res: Response, next: N
                 'businessCardImageUrl',
                 'status',
                 'rejectionReason',
-                'city'
+                'city',
+                'credit'
                 // Exclude passwordHash, googleId, etc.
             ]
         });
@@ -131,12 +131,6 @@ router.get('/me', authenticateToken, async (req: Request, res: Response, next: N
  *             type: object
  *             properties:
  *               name: { type: string }
- *               dob: { type: string, format: date }
- *               weight: { type: number }
- *               address1: { type: string }
- *               address2: { type: string }
- *               occupation: { type: string }
- *               income: { type: string }
  *               # Add other updatable fields, exclude email, password, profilePic etc.
  *     responses:
  *       200:
@@ -174,7 +168,7 @@ router.put('/me', authenticateToken, (async (req: Request, res: Response, next: 
         }
 
         // Define allowed fields to update - ADD gender, height, mbti
-        const allowedUpdates = ['name', 'dob', 'weight', 'address1', 'address2', 'occupation', 'income', 'gender', 'height', 'mbti', 'phone']; // Added missing fields
+        const allowedUpdates = ['name', 'gender', 'height', 'mbti', 'occupation', 'city', 'nickname']; // Removed fields
         const updates: { [key: string]: any } = {};
 
         console.log('Request body for update:', req.body);
@@ -193,37 +187,6 @@ router.put('/me', authenticateToken, (async (req: Request, res: Response, next: 
         if (hasUpdates) {
             await user.update(updates);
             console.log(`User ${userId} updated successfully with fields:`, Object.keys(updates));
-
-            // Recalculate age if dob was updated
-            if ('dob' in updates) { 
-                console.log('DOB updated, recalculating age...');
-                try {
-                     if (updates.dob) { 
-                        const birthDate = new Date(updates.dob);
-                        const today = new Date();
-                        let age = today.getFullYear() - birthDate.getFullYear();
-                        const m = today.getMonth() - birthDate.getMonth();
-                        if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-                            age--;
-                        }
-                        if (!isNaN(age) && age >= 0) {
-                             await user.update({ age: age });
-                             console.log(`Age recalculated and updated to: ${age}`);
-                        } else {
-                             console.warn('Invalid date resulted in invalid age for user:', userId);
-                             await user.update({ age: null }); 
-                             console.log('Age set to null due to invalid DOB calculation.');
-                        }
-                    } else {
-                        await user.update({ age: null });
-                        console.log('DOB set to null, age also set to null.');
-                    }
-                } catch (error) {
-                    console.error("Error calculating/updating age:", error);
-                     await user.update({ age: null }); 
-                     console.log('Age set to null due to error during calculation.');
-                }
-            }
 
             // ★ Update status to pending_approval and clear rejection reason after any profile update ★
             await user.update({
@@ -659,6 +622,41 @@ router.post(
     }
 ); 
 
+// Credit 구매 API 엔드포인트 추가
+router.post('/buy-credit', authenticateToken, (async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+        const userId = (req as any).user?.userId;
+        if (!userId) {
+            res.status(401).json({ message: 'Unauthorized' });
+            return;
+        }
+        
+        const amount = req.body.amount || 10; // 기본값 10
+        
+        // 사용자 찾기
+        const user = await User.findByPk(userId);
+        if (!user) {
+            res.status(404).json({ message: 'User not found' });
+            return;
+        }
+        
+        // 현재 credit 가져오기 (없으면 0으로 초기화)
+        const currentCredit = user.credit || 0;
+        
+        // credit 업데이트
+        await user.update({ credit: currentCredit + amount });
+        
+        // 업데이트된 사용자 정보 응답
+        res.status(200).json({ 
+            message: `${amount} credits added successfully`,
+            credit: currentCredit + amount
+        });
+    } catch (error) {
+        console.error('Error buying credit:', error);
+        next(error);
+    }
+}) as RequestHandler);
+
 // --- Swagger Schema Definition (Add this later in server.ts or a dedicated file) ---
 /**
  * @swagger
@@ -670,14 +668,13 @@ router.post(
  *         id: { type: integer, readOnly: true }
  *         email: { type: string, format: email, readOnly: true }
  *         name: { type: string }
- *         dob: { type: string, format: date }
  *         age: { type: integer, readOnly: true }
- *         weight: { type: number, format: float, nullable: true }
- *         phone: { type: string, nullable: true }
- *         address1: { type: string, nullable: true }
- *         address2: { type: string, nullable: true }
+ *         height: { type: integer, nullable: true }
+ *         gender: { type: string, nullable: true }
+ *         city: { type: string, nullable: true }
+ *         mbti: { type: string, nullable: true }
+ *         nickname: { type: string, nullable: true }
  *         occupation: { type: string, nullable: true }
- *         income: { type: string, nullable: true }
  *         profilePictureUrl: { type: string, nullable: true }
  *         createdAt: { type: string, format: date-time, readOnly: true }
  *         updatedAt: { type: string, format: date-time, readOnly: true }

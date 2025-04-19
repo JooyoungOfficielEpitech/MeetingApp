@@ -140,13 +140,15 @@ router.get('/stats/dashboard', async (req: Request, res: Response, next: NextFun
  *                     properties:
  *                       id: { type: integer }
  *                       name: { type: string }
- *                       # Add tier later if needed
+ *                       nickname: { type: string }
+ *                       gender: { type: string }
  *                   user2:
  *                     type: object
  *                     properties:
  *                       id: { type: integer }
  *                       name: { type: string }
- *                       # Add tier later if needed
+ *                       nickname: { type: string }
+ *                       gender: { type: string }
  *                   status: { type: string, enum: ['active', 'inactive', 'pending', 'completed', 'cancelled'] } # Example statuses
  *                   createdAt: { type: string, format: date-time }
  *       401:
@@ -168,12 +170,12 @@ router.get('/matches/recent', async (req: Request, res: Response, next: NextFunc
                 {
                     model: User,
                     as: 'User1',
-                    attributes: ['id', 'name', 'gender']
+                    attributes: ['id', 'name', 'nickname', 'gender']
                 },
                 {
                     model: User,
                     as: 'User2',
-                    attributes: ['id', 'name', 'gender']
+                    attributes: ['id', 'name', 'nickname', 'gender']
                 }
             ],
             attributes: ['matchId', 'isActive', 'createdAt']
@@ -183,8 +185,18 @@ router.get('/matches/recent', async (req: Request, res: Response, next: NextFunc
 
         const formattedMatches = recentMatches.map((match: any) => ({
             matchId: match.matchId,
-            user1: match.User1 ? { id: match.User1.id, name: match.User1.name, gender: match.User1.gender } : null,
-            user2: match.User2 ? { id: match.User2.id, name: match.User2.name, gender: match.User2.gender } : null,
+            user1: match.User1 ? { 
+                id: match.User1.id, 
+                name: match.User1.name, 
+                nickname: match.User1.nickname,
+                gender: match.User1.gender 
+            } : null,
+            user2: match.User2 ? { 
+                id: match.User2.id, 
+                name: match.User2.name, 
+                nickname: match.User2.nickname,
+                gender: match.User2.gender 
+            } : null,
             status: match.isActive ? 'active' : 'inactive',
             createdAt: match.createdAt
         }));
@@ -272,7 +284,7 @@ router.get('/users', async (req: Request, res: Response, next: NextFunction) => 
     // Apply search term if provided
     if (searchTerm) {
         whereClause[Op.or] = [
-            { name: { [Op.like]: `%${searchTerm}%` } },
+            { nickname: { [Op.like]: `%${searchTerm}%` } },
             { email: { [Op.like]: `%${searchTerm}%` } }
         ];
         console.log(`[Admin Users] Searching for: ${searchTerm}`);
@@ -802,7 +814,7 @@ router.get('/chats/:matchId/messages', isAdmin, async (req: Request, res: Respon
                 {
                     model: User,
                     as: 'Sender',
-                    attributes: ['id', 'name', 'gender']
+                    attributes: ['id', 'name', 'nickname', 'gender']
                 }
             ],
         });

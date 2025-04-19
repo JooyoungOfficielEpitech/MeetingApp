@@ -403,4 +403,118 @@ router.post('/stop', authenticateToken, async (req: Request, res: Response, next
 
 // --- ★ END NEW MATCHING FLOW ENDPOINTS ★ ---
 
+// checkMatchAccess 미들웨어 추가 (로그인한 사용자가 매치에 접근할 권한이 있는지 확인)
+const checkMatchAccess = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user || typeof req.user.userId !== 'number') {
+      return res.status(401).json({ message: 'Unauthorized: Invalid user data in token' });
+    }
+    
+    const userId = req.user.userId;
+    const matchId = req.params.matchId;
+    
+    const match = await Match.findOne({
+      where: {
+        matchId,
+        [Op.or]: [
+          { user1Id: userId },
+          { user2Id: userId }
+        ]
+      }
+    });
+    
+    if (!match) {
+      return res.status(403).json({ message: 'You do not have access to this match' });
+    }
+    
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * @swagger
+ * /api/matches/:matchId:
+ *   get:
+ *     summary: Get match details
+ *     tags: [Matches]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Match details
+ *       404:
+ *         description: Match not found
+ *       401:
+ *         description: Unauthorized (token missing or invalid)
+ */
+// @ts-ignore
+router.get('/:matchId', authenticateToken, checkMatchAccess, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const matchId = req.params.matchId;
+        const match = await Match.findOne({
+            where: { matchId },
+            include: [
+                { 
+                    model: User, 
+                    as: 'User1', 
+                    attributes: ['id', 'name', 'nickname', 'gender', 'age', 'profileImageUrls', 'city', 'mbti', 'height', 'createdAt', 'occupation'] 
+                },
+                { 
+                    model: User, 
+                    as: 'User2', 
+                    attributes: ['id', 'name', 'nickname', 'gender', 'age', 'profileImageUrls', 'city', 'mbti', 'height', 'createdAt', 'occupation'] 
+                }
+            ]
+        });
+
+        if (!match) {
+            return res.status(404).json({ message: 'Match not found' });
+        }
+
+        // Format users with nickname preference
+        const user1 = match.User1 ? {
+            id: match.User1.id,
+            name: match.User1.nickname || match.User1.name,
+            gender: match.User1.gender,
+            age: match.User1.age,
+            city: match.User1.city,
+            mbti: match.User1.mbti,
+            height: match.User1.height,
+            occupation: match.User1.occupation,
+            createdAt: match.User1.createdAt,
+            profileImage: match.User1.profileImageUrls && match.User1.profileImageUrls.length > 0 
+                ? match.User1.profileImageUrls[0] : null,
+            profileImageUrls: match.User1.profileImageUrls || []
+        } : null;
+
+        const user2 = match.User2 ? {
+            id: match.User2.id,
+            name: match.User2.nickname || match.User2.name,
+            gender: match.User2.gender,
+            age: match.User2.age,
+            city: match.User2.city,
+            mbti: match.User2.mbti,
+            height: match.User2.height,
+            occupation: match.User2.occupation,
+            createdAt: match.User2.createdAt,
+            profileImage: match.User2.profileImageUrls && match.User2.profileImageUrls.length > 0 
+                ? match.User2.profileImageUrls[0] : null,
+            profileImageUrls: match.User2.profileImageUrls || []
+        } : null;
+
+        res.json({
+            matchId: match.matchId,
+            isActive: match.isActive,
+            createdAt: match.createdAt,
+            updatedAt: match.updatedAt,
+            user1,
+            user2
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
 export default router; 

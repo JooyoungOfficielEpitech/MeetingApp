@@ -18,6 +18,7 @@ interface ChatMessage {
     Sender: { // Assuming the include alias was 'Sender'
         id: number;
         name: string;
+        nickname?: string;
         gender: string | null;
     };
 }
@@ -128,7 +129,7 @@ export default function AdminChatHistoryPage() {
                                 return (
                                     <div key={msg.id} className={`flex w-full ${alignmentClass}`}>
                                         <div className={`p-3 rounded-lg max-w-[80%] ${bgColorClass}`}>
-                                            <p className={`text-xs font-semibold mb-1 ${nameColorClass}`}>{msg.Sender?.name || `User ${msg.senderId}`}</p>
+                                            <p className={`text-xs font-semibold mb-1 ${nameColorClass}`}>{msg.Sender?.nickname || msg.Sender?.name || `User ${msg.senderId}`}</p>
                                             <p className="text-sm text-white">{msg.text}</p>
                                             <p className="text-xs text-slate-400 mt-1 text-right">{formatDate(msg.createdAt)}</p>
                                         </div>

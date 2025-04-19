@@ -19,6 +19,7 @@ interface UserProfile {
     name: string;
     gender: 'male' | 'female' | null;
     status: string;
+    credit: number; // 크레딧 필드 추가
     // ... other fields
 }
 
@@ -314,6 +315,32 @@ export default function MainPage() {
             <p>예상 매칭 시간: ...</p>
           </div>
            */}
+
+          {isLoading ? (
+            <div className="mb-4">
+                <p className="text-slate-300">로딩 중...</p>
+            </div>
+          ) : (
+            <div className="w-full max-w-lg">
+                {/* 유저 정보와 크레딧 표시 */}
+                <div className="mb-8 text-center">
+                    <h1 className={`text-2xl font-bold text-amber-400 mb-2 ${montserrat.className}`}>Welcome</h1>
+                    <div className="flex justify-center items-center space-x-2 mb-2">
+                        <p className="text-xl text-slate-200">
+                            {userInfo?.name || 'User'}
+                        </p>
+                        
+                        {/* 크레딧 표시 */}
+                        <div className="bg-amber-600 px-3 py-1 rounded-full text-sm font-medium ml-2">
+                            <span>크레딧: {userInfo?.credit || 0}</span>
+                        </div>
+                    </div>
+                    
+                    {/* 나머지 UI 내용 */}
+                    
+                </div>
+            </div>
+          )}
         </div> 
       </div> 
     </AuthGuard>
