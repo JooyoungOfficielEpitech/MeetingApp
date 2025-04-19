@@ -93,6 +93,91 @@ router.get('/active', authenticateToken, (async (req: Request, res: Response, ne
 
 /**
  * @swagger
+ * /api/matches/status:
+ *   get:
+ *     summary: Get the matching status for the current user
+ *     tags: [Matches]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Current matching status retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 isWaiting:
+ *                   type: boolean
+ *                   description: Whether the user is currently in the waiting list
+ *                 activeMatch:
+ *                   type: object
+ *                   nullable: true
+ *                   properties:
+ *                     matchId:
+ *                       type: string
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Server error
+ */
+// @ts-ignore
+router.get('/status', authenticateToken, async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user || typeof req.user.userId !== 'number') {
+        return res.status(401).json({ message: 'Unauthorized: Invalid user data in token.' });
+    }
+    const userId = req.user.userId;
+    
+    console.log(`[GET /api/matches/status] User ${userId} requested matching status.`);
+
+    try {
+        // 1. Check if user has an active match
+        const activeMatch = await Match.findOne({
+            where: {
+                [Op.or]: [{ user1Id: userId }, { user2Id: userId }],
+                isActive: true
+            },
+            attributes: ['matchId']
+        });
+
+        if (activeMatch) {
+            console.log(`[Match Status] User ${userId} has active match: ${activeMatch.matchId}`);
+            return res.status(200).json({
+                isWaiting: false,
+                activeMatch: {
+                    matchId: activeMatch.matchId
+                }
+            });
+        }
+
+        // 2. Check if user is in waiting list
+        const waitingEntry = await MatchingWaitList.findOne({
+            where: { userId: userId }
+        });
+
+        if (waitingEntry) {
+            console.log(`[Match Status] User ${userId} is in waiting list (gender: ${waitingEntry.gender}).`);
+            return res.status(200).json({
+                isWaiting: true,
+                activeMatch: null
+            });
+        }
+
+        // 3. User is neither in a match nor waiting
+        console.log(`[Match Status] User ${userId} is not in a match or waiting list.`);
+        return res.status(200).json({
+            isWaiting: false,
+            activeMatch: null
+        });
+        
+    } catch (error) {
+        console.error(`[GET /api/matches/status] Error for user ${userId}:`, error);
+        next(error);
+    }
+});
+
+/**
+ * @swagger
  * /api/matches/start:
  *   post:
  *     summary: Start finding a match (female users only)
@@ -129,6 +214,11 @@ router.post('/start', authenticateToken, async (req: Request, res: Response, nex
             return res.status(403).json({ message: 'Only female users can initiate matching.' });
         }
 
+        // Check credit balance for female users
+        if (user.credit < 1) {
+            return res.status(400).json({ message: 'Not enough credits. Need at least 1 credit to start matching.' });
+        }
+
         const existingMatch = await Match.findOne({ 
             where: { [Op.or]: [{ user1Id: userId }, { user2Id: userId }], isActive: true }
         });
@@ -142,6 +232,11 @@ router.post('/start', authenticateToken, async (req: Request, res: Response, nex
             console.warn(`[Match Start] User ${userId} is already on the waitlist.`);
             return res.status(202).json({ message: 'Already searching for a match.' });
         }
+
+        // Deduct 1 credit
+        user.credit -= 1;
+        await user.save();
+        console.log(`[Match Start] Deducted 1 credit from female user ${userId}. New credit: ${user.credit}`);
 
         const availableMale = await MatchingWaitList.findOne({
             include: [{ model: User, as: 'User', where: { gender: 'male' }, required: true }], 
@@ -397,6 +492,131 @@ router.post('/stop', authenticateToken, async (req: Request, res: Response, next
 
     } catch (error) {
         console.error(`[POST /api/matches/stop] Error for user ${userId}:`, error);
+        next(error);
+    }
+});
+
+/**
+ * @swagger
+ * /api/matches/join-queue:
+ *   post:
+ *     summary: Male users join the matching queue for 1 minute
+ *     tags: [Matches]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200: 
+ *         description: Successfully joined the queue
+ *       400:
+ *         description: User already in queue, not enough credits, or has active match
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Only male users can use this endpoint
+ *       500:
+ *         description: Server error
+ */
+// @ts-ignore
+router.post('/join-queue', authenticateToken, async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user || typeof req.user.userId !== 'number') {
+        return res.status(401).json({ message: 'Unauthorized: Invalid user data in token.' });
+    }
+    const userId = req.user.userId;
+    
+    console.log(`[POST /api/matches/join-queue] User ${userId} requested to join matching queue.`);
+
+    try {
+        // 1. Check if male
+        const user = await User.findByPk(userId);
+        if (!user) {
+            console.warn(`[Join Queue] User not found in DB: ${userId}`);
+            return res.status(404).json({ message: 'User not found.' });
+        }
+
+        if (user.gender !== 'male') {
+            console.warn(`[Join Queue] User ${userId} is not male (gender: ${user.gender}), cannot join queue.`);
+            return res.status(403).json({ message: 'Only male users can join the matching queue.' });
+        }
+
+        // 2. Check if already has active match
+        const existingMatch = await Match.findOne({ 
+            where: { [Op.or]: [{ user1Id: userId }, { user2Id: userId }], isActive: true }
+        });
+        if (existingMatch) {
+            console.warn(`[Join Queue] User ${userId} already has an active match: ${existingMatch.matchId}`);
+            return res.status(400).json({ message: 'You already have an active match.' });
+        }
+
+        // 3. Check if already in waitlist
+        const alreadyWaiting = await MatchingWaitList.findOne({ where: { userId } });
+        if (alreadyWaiting) {
+            console.warn(`[Join Queue] User ${userId} is already in the waitlist.`);
+            return res.status(400).json({ message: 'You are already in the queue.' });
+        }
+
+        // 4. Check and deduct credit
+        if (user.credit < 1) {
+            return res.status(400).json({ message: 'Not enough credits. Need at least 1 credit to join the queue.' });
+        }
+
+        // Deduct 1 credit
+        user.credit -= 1;
+        await user.save();
+        console.log(`[Join Queue] Deducted 1 credit from user ${userId}. New credit: ${user.credit}`);
+
+        // 5. Add to waitlist
+        await MatchingWaitList.create({ userId: userId, gender: 'male' });
+        console.log(`[Join Queue] Added male user ${userId} to waitlist.`);
+
+        // 6. Set timeout to remove from waitlist after 1 minute
+        setTimeout(async () => {
+            try {
+                const removed = await MatchingWaitList.destroy({ where: { userId } });
+                if (removed) {
+                    console.log(`[Join Queue] Auto-removed male user ${userId} from waitlist after 1 minute.`);
+                    
+                    // Notify user via socket if connected
+                    let userSocketId: string | null = null;
+                    for (const [socketId, connectedUser] of connectedUsers.entries()) {
+                        if (connectedUser.userId === userId) {
+                            userSocketId = socketId;
+                            break;
+                        }
+                    }
+                    if (userSocketId) {
+                        io.to(userSocketId).emit('match_update', { status: 'idle' });
+                        console.log(`[Join Queue] Sent match_update (idle) to user ${userId} after queue timeout.`);
+                    }
+                }
+            } catch (err) {
+                console.error(`[Join Queue] Error removing user ${userId} from waitlist after timeout:`, err);
+            }
+        }, 60000); // 1 minute = 60000 ms
+
+        // 7. Emit socket event for client UI update
+        try {
+            let userSocketId: string | null = null;
+            for (const [socketId, connectedUser] of connectedUsers.entries()) {
+                if (connectedUser.userId === userId) {
+                    userSocketId = socketId;
+                    break;
+                }
+            }
+            if (userSocketId) {
+                io.to(userSocketId).emit('match_update', { status: 'waiting' });
+                console.log(`[Join Queue] Sent match_update (waiting) to user ${userId}.`);
+            }
+        } catch (socketError) {
+            console.error('[Join Queue] Error emitting WebSocket update:', socketError);
+        }
+
+        return res.status(200).json({ 
+            message: 'Successfully joined the matching queue. Will be removed after 1 minute.',
+            creditsRemaining: user.credit
+        });
+
+    } catch (error) {
+        console.error(`[POST /api/matches/join-queue] Error for user ${userId}:`, error);
         next(error);
     }
 });

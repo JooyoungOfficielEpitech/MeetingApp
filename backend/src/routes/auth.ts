@@ -333,52 +333,16 @@ router.post('/login',
             }
             // --- User is active, proceed with login --- 
 
-            // --- Add male user to waitlist if not occupied --- 
-            if (user.gender === 'male' && user.occupation === false) {
-                try {
-                    const [waitlistEntry, created] = await MatchingWaitList.findOrCreate({
-                        where: { userId: user.id },
-                        defaults: { userId: user.id, gender: 'male' } // Add gender: 'male' here
-                    });
-                    if (created) {
-                        console.log(`Male user ${user.id} added to MatchingWaitList on login (gender: male).`);
-                    } else {
-                        console.log(`Male user ${user.id} already in MatchingWaitList (login check).`);
-                    }
-                } catch (waitlistError) {
-                    console.error(`Error ensuring user ${user.id} in MatchingWaitList during login:`, waitlistError);
-                }
-            }
-            // --------------------------------------------------
-
-            // --- Check for active match for this user --- 
-            let activeMatchId: string | null = null;
-            try {
-                 const activeMatch = await Match.findOne({
-                     where: {
-                         [Op.or]: [
-                             { user1Id: user.id },
-                             { user2Id: user.id }
-                         ],
-                         isActive: true
-                     },
-                     order: [['createdAt', 'DESC']] // Get the most recent active match
-                 });
-                 if (activeMatch) {
-                     activeMatchId = activeMatch.matchId;
-                     console.log(`User ${user.id} has an active match: ${activeMatchId}`);
-                 }
-            } catch (matchError) {
-                 console.error(`Error checking for active match for user ${user.id}:`, matchError);
-                 // Proceed without active match info in case of error
-            }
+            // --- NO LONGER AUTOMATICALLY ADD MALE USERS TO WAITLIST ---
+            // Male users will now join the queue manually via /api/matches/join-queue endpoint
             // -------------------------------------------
 
-            // --- Login Successful --- 
-            const payload = { 
-                userId: user.id, 
+            // Generate JWT token
+            const payload = {
+                userId: user.id,
                 email: user.email,
-                status: user.status // Include user status in JWT payload
+                status: user.status,
+                gender: user.gender
             };
             console.log('JWT Payload:', payload); // Log the payload
             const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
@@ -394,7 +358,6 @@ router.post('/login',
             res.json({ 
                 token, 
                 user: userResponse, 
-                activeMatchId: activeMatchId // Include activeMatchId (null if none found)
             });
 
         } catch (error) {

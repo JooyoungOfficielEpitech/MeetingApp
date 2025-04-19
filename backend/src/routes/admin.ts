@@ -366,80 +366,9 @@ router.patch('/users/:userId/approve', async (req: Request, res: Response, next:
         await user.save();
         console.log(`[Admin Approve] User ${userId} status updated to 'active'.`);
 
-        // --- Add male user to waitlist UPON APPROVAL --- 
-        let addedToWaitlist = false;
-        if (user.gender === 'male') {
-            try {
-                const [waitlistEntry, created] = await MatchingWaitList.findOrCreate({
-                    where: { userId: user.id },
-                    defaults: { userId: user.id, gender: 'male' }
-                });
-                addedToWaitlist = true; // Mark that we potentially added/found the male user
-                if (created) {
-                    console.log(`[Admin Approve] Male user ${userId} added to MatchingWaitList (gender: male).`);
-                } else {
-                    console.log(`[Admin Approve] Male user ${userId} was already in MatchingWaitList.`);
-                }
-            } catch (waitlistError: any) {
-                console.error(`[Admin Approve] Error adding user ${userId} to MatchingWaitList:`, waitlistError);
-            }
-        }
+        // --- NO LONGER AUTOMATICALLY ADD MALE USERS TO WAITLIST ---
+        // Male users will now join the queue manually via /api/matches/join-queue endpoint
         // -------------------------------------------
-
-        // --- ★ Check for waiting female AFTER adding male to waitlist ★ ---
-        if (addedToWaitlist) { // Only proceed if the approved user is male and was added/found in waitlist
-             console.log(`[Admin Approve] Checking for waiting female to match with newly approved male ${userId}...`);
-             const sequelize = db.sequelize; // Get sequelize instance
-             try {
-                const waitingFemale = await MatchingWaitList.findOne({
-                    where: { gender: 'female' },
-                    order: [['createdAt', 'ASC']] // Match with the longest waiting female
-                });
-
-                if (waitingFemale) {
-                    const femaleUserId = waitingFemale.userId;
-                    const maleUserId = user.id; // The user just approved
-                    console.log(`[Admin Approve] Found waiting female ${femaleUserId} for male ${maleUserId}. Attempting match.`);
-
-                    // Create Match and Remove both from Waitlist in Transaction
-                    const matchId = `match-${femaleUserId}-${maleUserId}-${Date.now()}`;
-                    await sequelize.transaction(async (t: any) => {
-                        await Match.create({ 
-                            matchId, user1Id: femaleUserId, user2Id: maleUserId, isActive: true, status: 'active' 
-                        }, { transaction: t });
-                        await MatchingWaitList.destroy({ 
-                            where: { userId: [femaleUserId, maleUserId] }, 
-                            transaction: t 
-                        });
-                         console.log(`[Admin Approve Transaction] Match ${matchId} created, users removed from waitlist.`);
-                    });
-                    // --- Transaction End ---
-                    
-                    // Notify users via WebSocket
-                    try {
-                         let femaleSocketId: string | null = null;
-                         let maleSocketId: string | null = null;
-                         for (const [socketId, connectedUser] of connectedUsers.entries()) {
-                             if (connectedUser.userId === femaleUserId) femaleSocketId = socketId;
-                             if (connectedUser.userId === maleUserId) maleSocketId = socketId;
-                             if (femaleSocketId && maleSocketId) break;
-                         }
-                         const updatePayload = { status: 'matched', matchId: matchId };
-                         if (femaleSocketId) ioInstance.to(femaleSocketId).emit('match_update', updatePayload);
-                         if (maleSocketId) ioInstance.to(maleSocketId).emit('match_update', updatePayload);
-                         console.log(`[Admin Approve Match] Sent match_update to users ${femaleUserId} and ${maleUserId}.`);
-                    } catch (socketError) {
-                         console.error("[Admin Approve Match] Error emitting WebSocket update:", socketError);
-                    }
-
-                } else {
-                     console.log(`[Admin Approve] No female users currently waiting in MatchingWaitList.`);
-                }
-             } catch (matchCheckError) {
-                 console.error("[Admin Approve] Error checking/creating match after approval:", matchCheckError);
-             }
-        }
-        // ---------------------------------------------------------------
 
         // --- Generate NEW JWT with ACTIVE status --- 
         const newPayload = {

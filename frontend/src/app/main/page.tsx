@@ -29,6 +29,20 @@ interface MatchUpdatePayload {
     matchId?: string;
 }
 
+// Match status response structure
+interface MatchStatusResponse {
+    isWaiting: boolean;
+    activeMatch: {
+        matchId: string;
+    } | null;
+}
+
+// Join queue response structure
+interface JoinQueueResponse {
+    message: string;
+    creditsRemaining: number;
+}
+
 export default function MainPage() {
   const router = useRouter();
   const socketRef = useRef<Socket | null>(null);
@@ -40,6 +54,7 @@ export default function MainPage() {
   const [userInfo, setUserInfo] = useState<UserProfile | null>(null); // User info (incl. gender)
   const [isFindingMatchFemale, setIsFindingMatchFemale] = useState(false); // Is FEMALE user actively finding (after clicking start)?
   const [activeMatchId, setActiveMatchId] = useState<string | null>(null); // Store active match ID if user already has one
+  const [isMaleWaiting, setIsMaleWaiting] = useState(false);
   // --- End State Variables ---
 
   // --- WebSocket Connection Effect --- 
@@ -94,22 +109,26 @@ export default function MainPage() {
             case 'matched':
               console.log('[WebSocket] Updating state: matched, matchId:', payload.matchId);
               setActiveMatchId(payload.matchId || null);
-              setIsFindingMatchFemale(false); 
+              setIsFindingMatchFemale(false);
+              setIsMaleWaiting(false);
               break;
             case 'finding': 
               console.log('[WebSocket] Updating state: finding (female)');
               setActiveMatchId(null);
               setIsFindingMatchFemale(true);
+              setIsMaleWaiting(false);
               break;
             case 'idle': 
               console.log('[WebSocket] Updating state: idle');
               setActiveMatchId(null);
               setIsFindingMatchFemale(false);
+              setIsMaleWaiting(false);
               break;
             case 'waiting': 
               console.log('[WebSocket] Updating state: waiting (male)');
               setActiveMatchId(null);
-              setIsFindingMatchFemale(false); 
+              setIsFindingMatchFemale(false);
+              setIsMaleWaiting(true);
               break;
             default:
               console.warn('MainPage: Received unknown match_update status:', payload.status);
@@ -147,32 +166,29 @@ export default function MainPage() {
           setUserInfo(fetchedUser);
           console.log("MainPage: User info fetched:", fetchedUser);
 
-          // Still need to check initial active match via HTTP
+          // Check matching status via the new endpoint
           if (fetchedUser && fetchedUser.id) { 
-              console.log(`MainPage: Checking initial active match status for user ${fetchedUser.id}...`);
+              console.log(`MainPage: Checking matching status for user ${fetchedUser.id}...`);
               try {
-                  const matchCheckResponse = await axiosInstance.get<{ matchId: string } | null>('/api/matches/active'); 
-                  console.log("MainPage: /api/matches/active response status:", matchCheckResponse.status);
-                  if (matchCheckResponse.status === 200 && matchCheckResponse.data?.matchId) {
-                      console.log("MainPage: Found existing active match on load:", matchCheckResponse.data.matchId);
-                      setActiveMatchId(matchCheckResponse.data.matchId);
+                  const statusResponse = await axiosInstance.get<MatchStatusResponse>('/api/matches/status'); 
+                  console.log("MainPage: /api/matches/status response:", statusResponse.data);
+                  
+                  if (statusResponse.data.activeMatch?.matchId) {
+                      console.log("MainPage: User has active match:", statusResponse.data.activeMatch.matchId);
+                      setActiveMatchId(statusResponse.data.activeMatch.matchId);
+                      setIsFindingMatchFemale(false);
+                  } else if (statusResponse.data.isWaiting) {
+                      console.log("MainPage: User is waiting for a match");
+                      setActiveMatchId(null);
+                      setIsFindingMatchFemale(true);
                   } else {
-                       // Catch cases where API might return 2xx without matchId (should ideally be 404)
-                       console.log("MainPage: No existing active match found on load (Non-200 or no matchId).");
-                       setActiveMatchId(null);
+                      console.log("MainPage: User is not in a match or waiting");
+                      setActiveMatchId(null);
+                      setIsFindingMatchFemale(false);
                   }
               } catch (matchError: any) {
-                  // Log the actual error received
-                  console.error("MainPage: Error during /api/matches/active call:", matchError.response?.status, matchError.response?.data || matchError.message);
-                  if (matchError.response?.status === 404) {
-                       console.log("MainPage: No existing active match found on load (404 received).");
-                       setActiveMatchId(null); // Explicitly set null on 404
-                  } else {
-                       // For other errors, don't assume no match, log error prominently
-                       console.error("MainPage: Unexpected error checking initial match status (/active).");
-                       setError("Failed to check current match status."); // Show error to user
-                       // Do NOT set activeMatchId to null here, as we don't know the actual state
-                  }
+                  console.error("MainPage: Error checking matching status:", matchError.response?.status, matchError.response?.data || matchError.message);
+                  setError("Failed to check current match status.");
               }
           }
       } catch (err: any) {
@@ -197,23 +213,38 @@ export default function MainPage() {
   const handleStartMatch = async () => {
     if (isLoading || isFindingMatchFemale || userInfo?.gender !== 'female') return;
     console.log("MainPage: handleStartMatch called (Female)");
-    // Optimistic UI update (optional, could rely solely on websocket)
-    // setIsFindingMatchFemale(true);
     setIsLoading(true); // Show loading indicator during API call
     setError(null);
 
     try {
-      // No need to clear interval here
       await axiosInstance.post('/api/matches/start');
-      // Backend will send 'match_update' via WebSocket on success (200 or 202)
       console.log("MainPage: /api/matches/start request sent.");
     } catch (err: any) {
       console.error("MainPage: Error starting match (Female):", err);
       setError(err.response?.data?.message || '매칭 시작 중 오류가 발생했습니다.');
-      // Reset optimistic UI if needed
-      // setIsFindingMatchFemale(false);
     } finally {
       setIsLoading(false); // Hide loading indicator
+    }
+  };
+
+  const handleJoinQueue = async () => {
+    if (isLoading || isFindingMatchFemale || userInfo?.gender !== 'male') return;
+    console.log("MainPage: handleJoinQueue called (Male)");
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await axiosInstance.post<JoinQueueResponse>('/api/matches/join-queue');
+      console.log("MainPage: /api/matches/join-queue request sent.", response.data);
+      setIsMaleWaiting(true);
+      if (response.data.creditsRemaining !== undefined) {
+        setUserInfo(prev => prev ? {...prev, credit: response.data.creditsRemaining} : prev);
+      }
+    } catch (err: any) {
+      console.error("MainPage: Error joining queue (Male):", err);
+      setError(err.response?.data?.message || '대기열 참여 중 오류가 발생했습니다.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -224,9 +255,7 @@ export default function MainPage() {
     setError(null);
 
     try {
-       // No need to clear interval here
        await axiosInstance.post('/api/matches/stop');
-       // Backend will send 'match_update' via WebSocket on success
        console.log("MainPage: /api/matches/stop request sent.");
     } catch (err: any) { 
         console.error("MainPage: Error stopping match (Female):", err);
@@ -258,13 +287,18 @@ export default function MainPage() {
           } else {
               buttonText = 'Start Matching';
               buttonAction = handleStartMatch;
-              isButtonDisabled = false; 
+              isButtonDisabled = userInfo.credit < 1; // Disable if no credits
           }
       } else if (userInfo?.gender === 'male') {
-          // Male users: Show disabled "Finding" state unless active match found
-          buttonText = 'Finding Opponent...'; 
-          buttonAction = () => {}; // No action for male button click
-          isButtonDisabled = true; 
+          if (isMaleWaiting) {
+              buttonText = '찾는중...';
+              buttonAction = () => {};
+              isButtonDisabled = true;
+          } else {
+              buttonText = 'Join Queue (1 min)';
+              buttonAction = handleJoinQueue;
+              isButtonDisabled = userInfo.credit < 1;
+          }
       } else {
            // User profile not loaded or gender is null
            buttonText = 'Complete Profile'; 
@@ -297,12 +331,16 @@ export default function MainPage() {
             <button
               onClick={buttonAction}
               disabled={isButtonDisabled}
-              className={`w-full px-8 py-4 rounded-full text-lg font-semibold transition-all duration-300 ease-in-out shadow-lg hover:shadow-xl disabled:opacity-60 disabled:cursor-not-allowed ${isFindingMatchFemale ? 'bg-gray-600 hover:bg-gray-500 text-white' : 'bg-amber-500 hover:bg-amber-600 text-black'} focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-black focus:ring-amber-400`}
+              className={`w-full px-8 py-4 rounded-full text-lg font-semibold transition-all duration-300 ease-in-out shadow-lg hover:shadow-xl disabled:opacity-60 disabled:cursor-not-allowed ${
+                isFindingMatchFemale || isMaleWaiting 
+                  ? 'bg-gray-600 hover:bg-gray-500 text-white' 
+                  : 'bg-amber-500 hover:bg-amber-600 text-black'
+              } focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-black focus:ring-amber-400`}
             >
               {isLoading ? 'Loading...' : buttonText}
             </button>
-             {/* Keep indicator for female finding state */} 
-             {isFindingMatchFemale && (
+             {/* 대기 상태 표시 (여성과 남성 모두) */} 
+             {(isFindingMatchFemale || isMaleWaiting) && (
                    <p className="text-sm text-amber-400 mt-4 animate-pulse">Searching for match...</p>
               )}
               {error && <p className="text-sm text-red-400 mt-4">Error: {error}</p>} 

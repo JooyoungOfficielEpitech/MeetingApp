@@ -23,9 +23,9 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">82.75% </span>
+                <span class="strong">80.55% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>24/29</span>
+                <span class='fraction'>29/36</span>
             </div>
         
             
@@ -44,9 +44,9 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">82.14% </span>
+                <span class="strong">80% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>23/28</span>
+                <span class='fraction'>28/35</span>
             </div>
         
             
@@ -107,7 +107,23 @@
 <a name='L42'></a><a href='#L42'>42</a>
 <a name='L43'></a><a href='#L43'>43</a>
 <a name='L44'></a><a href='#L44'>44</a>
-<a name='L45'></a><a href='#L45'>45</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L45'></a><a href='#L45'>45</a>
+<a name='L46'></a><a href='#L46'>46</a>
+<a name='L47'></a><a href='#L47'>47</a>
+<a name='L48'></a><a href='#L48'>48</a>
+<a name='L49'></a><a href='#L49'>49</a>
+<a name='L50'></a><a href='#L50'>50</a>
+<a name='L51'></a><a href='#L51'>51</a>
+<a name='L52'></a><a href='#L52'>52</a>
+<a name='L53'></a><a href='#L53'>53</a>
+<a name='L54'></a><a href='#L54'>54</a>
+<a name='L55'></a><a href='#L55'>55</a>
+<a name='L56'></a><a href='#L56'>56</a>
+<a name='L57'></a><a href='#L57'>57</a>
+<a name='L58'></a><a href='#L58'>58</a>
+<a name='L59'></a><a href='#L59'>59</a>
+<a name='L60'></a><a href='#L60'>60</a>
+<a name='L61'></a><a href='#L61'>61</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">6x</span>
 <span class="cline-any cline-yes">6x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -140,16 +156,32 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">29x</span>
+<span class="cline-any cline-yes">29x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">29x</span>
 <span class="cline-any cline-yes">29x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">29x</span>
+<span class="cline-any cline-yes">29x</span>
+<span class="cline-any cline-yes">29x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">29x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">29x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">29x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
@@ -184,16 +216,32 @@ export const authenticateToken = (req: Request, res: Response, next: NextFunctio
 &nbsp;
         // req.user 할당 시 타입 단언 불필요 (Express.User가 증강됨)
         console.log('[AuthMiddleware] Token verified. Payload:', user);
+        console.log('[AuthMiddleware] User ID from token:', user.userId, 'Type:', typeof user.userId);
+        
         // Ensure payload matches the augmented Express.User structure
         if (user &amp;&amp; typeof user.userId === 'number' &amp;&amp; typeof user.email === 'string') {
             req.user = user; // Directly assign if structure is correct
+            
+            // 사용자 존재 유효성 미리 체크 (선택적)
+            try {
+                const db = require('../../models');
+                const User = db.User;
+                
+                // 비동기 검사를 동기식으로 처리하지 않고, 미들웨어에서는 토큰 유효성만 확인
+                console.log(`[AuthMiddleware] Validated token for user ID: ${user.userId}`);
+            } catch (dbError) {
+<span class="cstat-no" title="statement not covered" >                console.error('[AuthMiddleware] Database check error:', dbError);</span>
+                // 데이터베이스 오류가 발생해도 토큰이 유효하면 계속 진행
+            }
+            
+            next(); // pass the execution to the next handler/middleware
         } else <span class="missing-if-branch" title="else path not taken" >E</span>{
 <span class="cstat-no" title="statement not covered" >            console.error('[AuthMiddleware] Invalid JWT payload structure for req.user.');</span>
+<span class="cstat-no" title="statement not covered" >            console.error('[AuthMiddleware] User payload:', user);</span>
             // Handle error appropriately, maybe return 403
 <span class="cstat-no" title="statement not covered" >            res.status(403).json({ message: 'Invalid token payload' });</span>
 <span class="cstat-no" title="statement not covered" >            return;</span>
         }
-        next(); // pass the execution to the next handler/middleware
     });
 }; </pre></td></tr></table></pre>
 
@@ -202,7 +250,7 @@ export const authenticateToken = (req: Request, res: Response, next: NextFunctio
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2025-04-18T05:10:14.588Z
+                at 2025-04-19T09:12:42.263Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

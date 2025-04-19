@@ -71,14 +71,16 @@ const router = express.Router();
 // @ts-ignore // Ignore overload error for this handler
 router.get('/me', authenticateToken, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const userId = (req as any).user?.userId;
-    console.log(`[GET /api/profile/me] Request for user ID: ${userId}`);
+    console.log(`[GET /api/profile/me] Request for user ID: ${userId}, Type: ${typeof userId}`);
 
     if (!userId) {
+        console.error('[GET /api/profile/me] Error: User ID not found in token');
         res.status(401).json({ message: 'User ID not found in token' });
         return; // Return void
     }
 
     try {
+        console.log(`[GET /api/profile/me] Finding user with ID: ${userId}`);
         const user = await User.findByPk(userId, {
             attributes: [
                 'id',
@@ -101,7 +103,24 @@ router.get('/me', authenticateToken, async (req: Request, res: Response, next: N
         });
 
         if (!user) {
-            res.status(404).json({ message: 'User not found' });
+            console.error(`[GET /api/profile/me] User not found for ID: ${userId}`);
+            
+            // 모든 사용자 ID 목록 확인 (디버깅용)
+            try {
+                const allUsers = await User.findAll({
+                    attributes: ['id', 'email'],
+                    limit: 10
+                });
+                console.log(`[GET /api/profile/me] Available users (first 10):`, 
+                    allUsers.map((u: any) => ({ id: u.id, email: u.email })));
+            } catch (err) {
+                console.error('[GET /api/profile/me] Error fetching all users:', err);
+            }
+            
+            res.status(404).json({ 
+                message: 'User not found', 
+                details: `User with ID ${userId} does not exist in the database. Please check your account or contact support.` 
+            });
             return; // Return void
         }
         
@@ -391,7 +410,7 @@ router.post(
             businessCard?: Express.Multer.File[];
         };
 
-        console.log(`[POST /api/profile/complete-regular] Processing request for user ID: ${userId}`);
+        console.log(`[POST /api/profile/complete-regular] Processing request for user ID: ${userId}, Type: ${typeof userId}`);
 
         if (!userId) {
             console.error('[complete-regular] Error: userId missing after authenticateToken.');
@@ -400,10 +419,28 @@ router.post(
         }
 
         try {
+            console.log(`[complete-regular] Finding user with ID: ${userId}`);
             const user = await User.findByPk(userId);
             if (!user) {
                 console.error(`[complete-regular] Error: User not found for ID: ${userId}`);
-                res.status(404).json({ message: 'User associated with this token not found.' });
+                
+                // 디버깅: 토큰과 사용자 불일치 원인 파악
+                try {
+                    const userCount = await User.count();
+                    console.log(`[complete-regular] Total users in database: ${userCount}`);
+                    
+                    if (userCount > 0) {
+                        const lastUser = await User.findOne({ order: [['id', 'DESC']] });
+                        console.log(`[complete-regular] Last user in database:`, lastUser?.toJSON());
+                    }
+                } catch (err) {
+                    console.error('[complete-regular] Error checking users:', err);
+                }
+                
+                res.status(404).json({ 
+                    message: 'User associated with this token not found.',
+                    details: `User ID ${userId} from token not found in database. Your account may have been deleted or there might be a database synchronization issue.`
+                });
                 return;
             }
 

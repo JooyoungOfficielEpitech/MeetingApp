@@ -382,24 +382,10 @@ export const handleConnection = (socket: any, ioInstance: SocketIOServer) => {
                     console.log(`[Force Leave] Reset Map isOccupied=false for users ${leavingUserId} and ${opponentUserId}.`);
                     console.log('[Force Leave] Connected Users Map:', Array.from(connectedUsers.values()).map(u => `${u.userId}(occ:${u.isOccupied})`));
 
-                    // Add male user back to waitlist
-                    let maleToAddBackId: number | null = null;
-                    if (leavingUserGender === 'male') maleToAddBackId = leavingUserId;
-                    else if (opponentGender === 'male') maleToAddBackId = opponentUserId;
-                    if (maleToAddBackId) {
-                        MatchingWaitList.findOrCreate({ where: { userId: maleToAddBackId }, defaults: { userId: maleToAddBackId, gender: 'male' }})
-                            .then(([entry, created]: [any, boolean]) => {
-                                if (created) console.log(`Male user ${maleToAddBackId} added back to MatchingWaitList after match end (gender: male).`);
-                                else console.log(`Male user ${maleToAddBackId} was already in waitlist after match end? (Should not happen often)`);
-                            })
-                            .catch((error: any) => console.error(`Error adding male user ${maleToAddBackId} back to waitlist:`, error));
-                    } else {
-                        console.log("No male user identified to add back to waitlist.");
-                    }
-
                     // --- Emit 'match_update' to BOTH users --- 
-                    const leavingUserPayload = { status: leavingUserGender === 'male' ? 'waiting' : 'idle' };
-                    const opponentPayload = { status: opponentGender === 'male' ? 'waiting' : 'idle' };
+                    // 모든 사용자가 대화 종료 후 'idle' 상태로 변경
+                    const leavingUserPayload = { status: 'idle' };
+                    const opponentPayload = { status: 'idle' };
 
                     // Emit to leaving user
                     ioInstance.to(socket.id).emit('match_update', leavingUserPayload);
@@ -419,14 +405,14 @@ export const handleConnection = (socket: any, ioInstance: SocketIOServer) => {
 
                 } else {
                     console.log(`Match ${matchIdToLeave} was already inactive when user ${leavingUserId} tried to force leave.`);
-                    const leavingUserPayload = { status: leavingUserGender === 'male' ? 'waiting' : 'idle' };
-                    ioInstance.to(socket.id).emit('match_update', leavingUserPayload);
+                    // 모든 사용자가 'idle' 상태로 변경
+                    ioInstance.to(socket.id).emit('match_update', { status: 'idle' });
                     socket.emit('force-leave-success', { matchId: matchIdToLeave });
                 }
             } else {
                 console.warn(`Match ${matchIdToLeave} not found in DB when trying to force leave.`);
-                const leavingUserPayload = { status: leavingUserGender === 'male' ? 'waiting' : 'idle' };
-                ioInstance.to(socket.id).emit('match_update', leavingUserPayload);
+                // 모든 사용자가 'idle' 상태로 변경
+                ioInstance.to(socket.id).emit('match_update', { status: 'idle' });
                 socket.emit('force-leave-success', { matchId: matchIdToLeave });
             }
         } catch (error) {

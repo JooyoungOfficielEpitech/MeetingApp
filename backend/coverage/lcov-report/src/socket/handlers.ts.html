@@ -23,30 +23,30 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">3.31% </span>
+                <span class="strong">3.47% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>10/302</span>
+                <span class='fraction'>10/288</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0.95% </span>
+                <span class="strong">1.11% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>1/105</span>
+                <span class='fraction'>1/90</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>0/28</span>
+                <span class='fraction'>0/26</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">3.29% </span>
+                <span class="strong">3.43% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>9/273</span>
+                <span class='fraction'>9/262</span>
             </div>
         
             
@@ -538,21 +538,7 @@
 <a name='L473'></a><a href='#L473'>473</a>
 <a name='L474'></a><a href='#L474'>474</a>
 <a name='L475'></a><a href='#L475'>475</a>
-<a name='L476'></a><a href='#L476'>476</a>
-<a name='L477'></a><a href='#L477'>477</a>
-<a name='L478'></a><a href='#L478'>478</a>
-<a name='L479'></a><a href='#L479'>479</a>
-<a name='L480'></a><a href='#L480'>480</a>
-<a name='L481'></a><a href='#L481'>481</a>
-<a name='L482'></a><a href='#L482'>482</a>
-<a name='L483'></a><a href='#L483'>483</a>
-<a name='L484'></a><a href='#L484'>484</a>
-<a name='L485'></a><a href='#L485'>485</a>
-<a name='L486'></a><a href='#L486'>486</a>
-<a name='L487'></a><a href='#L487'>487</a>
-<a name='L488'></a><a href='#L488'>488</a>
-<a name='L489'></a><a href='#L489'>489</a>
-<a name='L490'></a><a href='#L490'>490</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L476'></a><a href='#L476'>476</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">6x</span>
 <span class="cline-any cline-yes">6x</span>
@@ -937,20 +923,6 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -973,13 +945,13 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -1425,24 +1397,10 @@ export const handleConnection = <span class="fstat-no" title="function not cover
 <span class="cstat-no" title="statement not covered" >                    console.log(`[Force Leave] Reset Map isOccupied=false for users ${leavingUserId} and ${opponentUserId}.`);</span>
 <span class="cstat-no" title="statement not covered" >                    console.log('[Force Leave] Connected Users Map:', Array.from(connectedUsers.values()).map(<span class="fstat-no" title="function not covered" >u </span>=&gt; <span class="cstat-no" title="statement not covered" >`${u.userId}(occ:${u.isOccupied})`)</span>);</span>
 &nbsp;
-                    // Add male user back to waitlist
-                    let maleToAddBackId: number | null = <span class="cstat-no" title="statement not covered" >null;</span>
-<span class="cstat-no" title="statement not covered" >                    if (leavingUserGender === 'male') <span class="cstat-no" title="statement not covered" >maleToAddBackId = leavingUserId;</span></span>
-                    else <span class="cstat-no" title="statement not covered" ><span class="missing-if-branch" title="if path not taken" >I</span>if (opponentGender === 'male') <span class="cstat-no" title="statement not covered" >maleToAddBackId = opponentUserId;</span></span>
-<span class="cstat-no" title="statement not covered" >                    if (maleToAddBackId) {</span>
-<span class="cstat-no" title="statement not covered" >                        MatchingWaitList.findOrCreate({ where: { userId: maleToAddBackId }, defaults: { userId: maleToAddBackId, gender: 'male' }})</span>
-                            .then(<span class="fstat-no" title="function not covered" >([</span>entry, created]: [any, boolean]) =&gt; {
-<span class="cstat-no" title="statement not covered" >                                if (created) <span class="cstat-no" title="statement not covered" >console.log(`Male user ${maleToAddBackId} added back to MatchingWaitList after match end (gender: male).`);</span></span>
-                                else <span class="cstat-no" title="statement not covered" >console.log(`Male user ${maleToAddBackId} was already in waitlist after match end? (Should not happen often)`);</span>
-                            })
-                            .catch(<span class="fstat-no" title="function not covered" >(e</span>rror: any) =&gt; <span class="cstat-no" title="statement not covered" >console.error(`Error adding male user ${maleToAddBackId} back to waitlist:`, error))</span>;
-                    } else {
-<span class="cstat-no" title="statement not covered" >                        console.log("No male user identified to add back to waitlist.");</span>
-                    }
-&nbsp;
                     // --- Emit 'match_update' to BOTH users --- 
-                    const leavingUserPayload = <span class="cstat-no" title="statement not covered" >{ status: leavingUserGender === 'male' ? 'waiting' : 'idle' };</span>
-                    const opponentPayload = <span class="cstat-no" title="statement not covered" >{ status: opponentGender === 'male' ? 'waiting' : 'idle' };</span>
+                    // 모든 사용자가 대화 종료 후 'idle' 상태로 변경
+                    const leavingUserPayload = <span class="cstat-no" title="statement not covered" >{ status: 'idle' };</span>
+                    const opponentPayload = <span class="cstat-no" title="statement not covered" >{ status: 'idle' };</span>
 &nbsp;
                     // Emit to leaving user
 <span class="cstat-no" title="statement not covered" >                    ioInstance.to(socket.id).emit('match_update', leavingUserPayload);</span>
@@ -1462,14 +1420,14 @@ export const handleConnection = <span class="fstat-no" title="function not cover
 &nbsp;
                 } else {
 <span class="cstat-no" title="statement not covered" >                    console.log(`Match ${matchIdToLeave} was already inactive when user ${leavingUserId} tried to force leave.`);</span>
-                    const leavingUserPayload = <span class="cstat-no" title="statement not covered" >{ status: leavingUserGender === 'male' ? 'waiting' : 'idle' };</span>
-<span class="cstat-no" title="statement not covered" >                    ioInstance.to(socket.id).emit('match_update', leavingUserPayload);</span>
+                    // 모든 사용자가 'idle' 상태로 변경
+<span class="cstat-no" title="statement not covered" >                    ioInstance.to(socket.id).emit('match_update', { status: 'idle' });</span>
 <span class="cstat-no" title="statement not covered" >                    socket.emit('force-leave-success', { matchId: matchIdToLeave });</span>
                 }
             } else {
 <span class="cstat-no" title="statement not covered" >                console.warn(`Match ${matchIdToLeave} not found in DB when trying to force leave.`);</span>
-                const leavingUserPayload = <span class="cstat-no" title="statement not covered" >{ status: leavingUserGender === 'male' ? 'waiting' : 'idle' };</span>
-<span class="cstat-no" title="statement not covered" >                ioInstance.to(socket.id).emit('match_update', leavingUserPayload);</span>
+                // 모든 사용자가 'idle' 상태로 변경
+<span class="cstat-no" title="statement not covered" >                ioInstance.to(socket.id).emit('match_update', { status: 'idle' });</span>
 <span class="cstat-no" title="statement not covered" >                socket.emit('force-leave-success', { matchId: matchIdToLeave });</span>
             }
         } catch (error) {
@@ -1537,7 +1495,7 @@ export const handleConnection = <span class="fstat-no" title="function not cover
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2025-04-18T05:10:14.588Z
+                at 2025-04-19T09:12:42.263Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

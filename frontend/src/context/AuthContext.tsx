@@ -108,6 +108,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return false;
     }
 
+    // 토큰 디코딩으로 기본 정보 확인
+    try {
+      const tokenParts = token.split('.');
+      if (tokenParts.length === 3) {
+        const payload = JSON.parse(atob(tokenParts[1]));
+        console.log('인증 확인: 토큰 내 정보:', {
+          userId: payload.userId,
+          email: payload.email,
+          exp: payload.exp ? new Date(payload.exp * 1000).toLocaleString() : 'N/A',
+        });
+        
+        // 토큰 만료 확인
+        if (payload.exp && payload.exp * 1000 < Date.now()) {
+          console.warn('인증 확인: 토큰 만료됨');
+          safeLocalStorage.removeItem('token');
+          safeLocalStorage.removeItem('user');
+          setIsAuthenticated(false);
+          setUserInfo(null);
+          setStatus(null);
+          return false;
+        }
+      }
+    } catch (e) {
+      console.error('인증 확인: 토큰 파싱 오류:', e);
+    }
+
     try {
       console.log('인증 확인: 프로필 데이터 요청 중');
       const response = await axiosInstance.get<any>('/api/profile/me');
@@ -181,6 +207,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.error('인증 확인 오류:', err);
       console.log('응답 상태 코드:', err.response?.status);
       console.log('응답 데이터:', err.response?.data);
+      
+      // "User associated with this token not found" 오류 특별 처리
+      if (err.response?.status === 404 && 
+          err.response?.data?.message === 'User associated with this token not found.') {
+        console.error('인증 확인: 토큰에 연결된 사용자를 찾을 수 없음. 데이터베이스 동기화 문제 가능성');
+        
+        // 더 자세한 오류 메시지 표시 (있는 경우)
+        if (err.response?.data?.details) {
+          console.error('상세 오류:', err.response.data.details);
+        }
+        
+        // 세션 정리
+        safeLocalStorage.removeItem('token');
+        safeLocalStorage.removeItem('user');
+        safeLocalStorage.removeItem('userId');
+        safeLocalStorage.removeItem('isAdmin');
+        setIsAuthenticated(false);
+        setUserInfo(null);
+        setStatus(null);
+        
+        // 페이지 리디렉션 (로그인으로)
+        if (typeof window !== 'undefined' && window.location.pathname !== '/') {
+          window.location.href = '/';
+        }
+        
+        return false;
+      }
       
       // 토큰이 만료되었거나 유효하지 않은 경우
       if (err.response?.status === 401 || err.response?.status === 403) {
