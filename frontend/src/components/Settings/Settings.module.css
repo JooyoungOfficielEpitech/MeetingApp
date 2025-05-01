@@ -1,0 +1,64 @@
+/* Settings Page Styles */
+
+.pageWrapper {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+.contentWrapper {
+    display: flex;
+    flex-grow: 1;
+}
+
+.mainContent {
+    flex-grow: 1;
+    padding: 30px;
+    background-color: #f8f9fa;
+}
+
+.mainContent h2 {
+    margin-bottom: 30px;
+}
+
+.settingsSection {
+    background-color: #fff;
+    padding: 25px;
+    border-radius: 8px;
+    margin-bottom: 25px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    max-width: 600px; /* Limit width of the section */
+}
+
+.settingsSection h3 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    color: #dc3545; /* Red color for emphasis */
+}
+
+.settingsSection p {
+    margin-bottom: 20px;
+    color: #555;
+    line-height: 1.6;
+}
+
+/* General button style (can reuse from MyProfile or define here) */
+.button {
+    padding: 10px 25px;
+    border: none;
+    border-radius: 8px;
+    font-size: 1em;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* Delete button specific style */
+.deleteButton {
+    background-color: #dc3545; /* Red */
+    color: white;
+}
+
+.deleteButton:hover {
+    background-color: #b02a37; /* Darker red */
+} 

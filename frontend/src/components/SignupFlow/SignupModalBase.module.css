@@ -1,0 +1,162 @@
+.modalOverlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5); /* Keep semi-transparent background */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000; /* Ensure it's on top */
+    /* Apply backdrop blur */
+    backdrop-filter: blur(5px); /* Reverted from 6px */
+    /* Add vendor prefixes for wider compatibility if needed */
+    /* -webkit-backdrop-filter: blur(5px); */
+}
+
+.modalContainer {
+    background-color: #fff;
+    padding: 30px 40px; /* Reverted from 38px 50px */
+    border-radius: 16px; /* Reverted from 20px */
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2); /* Reverted from 0 5px 19px */
+    min-width: 450px; /* Reverted from 563px */
+    max-width: 90%;
+    width: auto;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    text-align: center; /* Center align text by default */
+    position: relative; /* Set positioning context for the close button */
+}
+
+/* Logo styles */
+.modalLogo {
+    display: block;
+    max-width: 100px; /* Reverted from 125px */
+    height: auto;
+    margin: 0 auto 20px auto; /* Reverted from 25px */
+}
+
+.modalHeader {
+    display: flex;
+    justify-content: center; /* Center title */
+    align-items: center;
+    /* border-bottom: 1px solid #eee; */ /* Remove border */
+    padding-bottom: 5px; /* Reverted from 6px */
+    margin-bottom: 10px; /* Reverted from 13px */
+    /* position: relative; */ /* Remove relative positioning */
+}
+
+.modalHeader h2 {
+    margin: 0;
+    font-size: 1.6em; /* Reverted from 2em */
+    font-weight: 700;
+    color: #000000;
+}
+
+/* Reposition close button */
+.closeButton {
+    position: absolute;
+    top: 15px;  /* Reverted from 19px */
+    right: 15px; /* Reverted from 19px */
+    /* transform: translateY(-50%); */ /* Remove vertical transform */
+    background: none;
+    border: none;
+    font-size: 1.5em; /* Reverted from 1.875em */
+    cursor: pointer;
+    color: #aaa; /* Lighter color */
+    padding: 5px; /* Reverted from 6px */
+    line-height: 1;
+}
+
+.closeButton:hover {
+    color: #333;
+}
+
+.modalBody {
+    flex-grow: 1; /* Allow body to take available space */
+    overflow-y: auto; /* Add scroll if content exceeds max-height */
+    padding-right: 10px; /* Reverted from 13px */
+    margin-right: -10px; /* Reverted from -13px */
+    margin-bottom: 30px; /* Reverted from 38px */
+}
+
+/* Updated input styles */
+.modalBody input[type="text"],
+.modalBody input[type="email"],
+.modalBody input[type="password"],
+.modalBody input[type="date"],
+.modalBody input[type="number"],
+.modalBody select,
+.modalBody textarea {
+    width: 100%;
+    padding: 16px 22px; /* Reverted from 20px 28px */
+    margin-bottom: 15px; /* Reverted from 19px */
+    border: 1px solid #E0E0E0; /* Match login input border */
+    border-radius: 30px; /* Reverted from 38px */
+    box-sizing: border-box;
+    font-size: 1em; /* Reverted from 1.25em */
+    background-color: #FFFFFF; /* Explicitly white */
+    color: #333;
+    text-align: left; /* Align input text left */
+}
+
+.modalBody input::placeholder,
+.modalBody textarea::placeholder {
+     color: #A9A9A9; /* Match login input placeholder */
+}
+
+/* Style labels if needed */
+.modalBody label {
+    display: block; /* Ensure label is on its own line */
+    text-align: left; /* Align label text left */
+    margin-bottom: 5px; /* Reverted from 6px */
+    font-weight: 600;
+    color: #555;
+}
+
+.modalFooter {
+    display: flex;
+    justify-content: center; /* Center footer content (the button) */
+    gap: 10px; /* Reverted from 13px */
+    /* border-top: 1px solid #eee; */ /* Remove border */
+    padding-top: 10px; /* Reverted from 13px */
+    margin-top: auto;
+}
+
+.navButton {
+    padding: 16px 20px; /* Reverted from 20px 25px */
+    border-radius: 30px; /* Reverted from 38px */
+    border: none;
+    cursor: pointer;
+    font-size: 1.1em; /* Reverted from 1.375em */
+    font-weight: 700; /* Match login button weight */
+}
+
+.backButton {
+    /* Hide back button for now based on image, SignupFlow controls visibility */
+    /* background-color: #f0f0f0; */
+    /* color: #333; */
+    /* border: 1px solid #ccc; */
+}
+
+.backButton:hover {
+    /* background-color: #e0e0e0; */
+}
+
+.nextButton {
+    background-color: #FE466C;
+    color: #fff;
+    width: 100%; /* Make button full width */
+}
+
+.nextButton:hover {
+    background-color: #E43A5F;
+}
+
+.nextButton:disabled {
+    background-color: #fcc2d0;
+    cursor: not-allowed;
+} 

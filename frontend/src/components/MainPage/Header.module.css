@@ -1,0 +1,78 @@
+/* Header Styles */
+.appHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 24px;
+    background-color: #fff;
+    border-bottom: 1px solid #e0e0e0;
+    height: 48px;
+    box-sizing: border-box;
+}
+
+.logoContainer {
+    /* Styles for logo area */
+}
+
+.logoText {
+    font-size: 1.44em;
+    font-weight: bold;
+    color: #000;
+}
+
+.userInfo {
+    display: flex;
+    align-items: center;
+    gap: 10px; /* Reduced gap from 16px */
+    font-size: 0.72em;
+}
+
+.connectionStatus {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: #12B76A; /* Green color */
+    font-weight: 500;
+}
+
+.statusDot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    background-color: #12B76A;
+    border-radius: 50%;
+}
+
+/* Updated styles for credit count (previously notificationCount) */
+.creditCount {
+    display: flex;
+    align-items: center;
+    gap: 5px; /* Gap between icon and number */
+    background-color: #f0f0f0;
+    padding: 4px 8px;
+    border-radius: 12px;
+    color: #555;
+    font-weight: 500;
+}
+
+.creditCount svg {
+    margin-bottom: -1.6px; /* Adjust icon alignment if needed */
+    color: #DAA520; /* Example: Golden color for coin icon */
+}
+
+/* Style for the new Recharge Button */
+.rechargeButton {
+    padding: 4px 10px;
+    background-color: #FE466C;
+    color: white;
+    border: none;
+    border-radius: 12px;
+    cursor: pointer;
+    font-size: 0.9em; /* Slightly smaller than user info base size */
+    font-weight: 500;
+    transition: background-color 0.2s ease;
+}
+
+.rechargeButton:hover {
+    background-color: #E43A5F;
+} 

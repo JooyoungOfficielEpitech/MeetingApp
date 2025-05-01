@@ -1,0 +1,230 @@
+/* Comment out or remove the :global(body) rule */
+/*
+:global(body) {
+    font-family: 'Inter', sans-serif;
+    background-color: #FFFFFF;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+*/
+
+/* Login Component Specific Styles */
+.loginContainer {
+    /* background-color: #FFFFFF; */ /* Removed background */
+    /* padding: 40px 20px; */ /* Removed padding */
+    text-align: center;
+    max-width: 800px; /* Reverted from 1000px */
+    width: 90%;
+    box-sizing: border-box;
+}
+
+/* Add styles for the logo image */
+.logo {
+    display: block; /* Ensure it takes its own line */
+    max-width: 300px; /* Reverted from 375px */
+    height: auto; /* Maintain aspect ratio */
+    margin: 0 auto 15px auto; /* Reverted from 19px */
+}
+
+.loginContainer h1 {
+    color: #000000;
+    font-size: 48px; /* Reverted from 60px */
+    font-weight: 700;
+    margin-top: 0;
+    margin-bottom: 8px; /* Reverted from 10px */
+    font-family: 'Inter', sans-serif;
+}
+
+.subtitle {
+    color: #000000;
+    font-size: 30px; /* Reverted from 38px */
+    margin-top: 0;
+    margin-bottom: 35px; /* Reverted from 44px */
+    font-weight: 700;
+}
+
+.loginContainer form {
+    display: flex;
+    flex-direction: column;
+    gap: 15px; /* Reverted from 19px */
+    margin-bottom: 20px; /* Reverted from 25px */
+}
+
+.inputField {
+    background-color: #FFFFFF; /* White background */
+    border: 1px solid #E0E0E0; /* Gray border */
+    border-radius: 30px; /* Reverted from 38px */
+    padding: 24px 40px; /* Reverted from 30px 50px */
+    font-size: 16px; /* Reverted from 20px */
+    color: #333333;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 700px; /* Reverted from 875px */
+    margin: 0 auto 15px auto; /* Reverted from 19px */
+}
+
+.inputField::placeholder {
+    color: #A9A9A9;
+}
+
+.btn {
+    padding: 18px 40px; /* Reverted from 23px 50px */
+    border: none;
+    border-radius: 30px; /* Reverted from 38px */
+    font-size: 17px; /* Reverted from 21px */
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px; /* Reverted from 13px */
+    box-sizing: border-box;
+    transition: background-color 0.2s ease;
+    width: 100%; 
+    max-width: 700px; /* Reverted from 875px */
+    margin-left: auto; 
+    margin-right: auto; 
+}
+
+.btnPrimary {
+    background-color: #FE466C;
+    color: #FFFFFF;
+    /* width: 100%; already set in .btn */
+}
+
+.btnPrimary:hover {
+    background-color: #E43A5F;
+}
+
+.options {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 5px; /* Reverted from 6px */
+    font-size: 14px; /* Reverted from 18px */
+    padding: 0 5px; /* Reverted from 6px */
+    max-width: 700px; /* Reverted from 875px */
+    margin-left: auto; /* Center */
+    margin-right: auto; /* Center */
+    width: 100%; 
+    box-sizing: border-box; 
+}
+
+.rememberMe {
+    display: flex;
+    align-items: center;
+    gap: 6px; /* Reverted from 8px */
+    color: #000000;
+    cursor: pointer;
+    font-size: 14px; /* Reverted from 18px */
+}
+
+.rememberMe input[type="checkbox"] {
+    accent-color: #FE466C;
+    width: 14px; /* Reverted from 18px */
+    height: 14px; /* Reverted from 18px */
+    cursor: pointer;
+}
+
+.loginContainer a {
+    color: #FE466C;
+    text-decoration: none;
+    font-weight: 700;
+}
+
+.loginContainer a:hover {
+    text-decoration: underline;
+}
+
+.forgotPassword {
+    font-size: 14px; /* Reverted from 18px */
+}
+
+.separator {
+    display: flex;
+    align-items: center;
+    color: #808080;
+    max-width: 700px; /* Reverted from 875px */
+    margin: 25px auto; /* Reverted from 31px */
+    width: 100%; 
+}
+
+.separator hr {
+    flex-grow: 1;
+    border: none;
+    border-top: 1px solid #EAEAEA;
+}
+
+.separator span {
+    padding: 0 15px; /* Reverted from 19px */
+    font-size: 13px; /* Reverted from 16px */
+    text-transform: lowercase;
+    color: #A9A9A9;
+}
+
+.btnSecondary {
+    background-color: #FFFFFF;
+    color: #000000;
+    border: 1px solid #E0E0E0;
+    margin-top: 12px; /* Reverted from 15px */
+}
+
+.btnSecondary:hover {
+    background-color: #F8F8F8;
+}
+
+.btnGoogle img {
+    width: 18px; /* Reverted from 23px */
+    height: 18px; /* Reverted from 23px */
+    margin-top: -1px; /* Reverted from -1px */
+}
+
+.btnKakao {
+    background-color: #FEE500;
+    color: #000000;
+    border: none;
+    margin-top: 12px; /* Reverted from 15px */
+}
+
+.btnKakao svg {
+    fill: #000000;
+    margin-top: -1px; /* Reverted from -1px */
+}
+
+.btnKakao:hover {
+    background-color: #F0D900;
+}
+
+.signupLink {
+    margin-top: 35px; /* Reverted from 44px */
+    margin-bottom: 25px; /* Reverted from 31px */
+    font-size: 14px; /* Reverted from 18px */
+    color: #000000;
+}
+
+.signupLink a {
+    color: #FE466C;
+    font-weight: 700;
+}
+
+.footerText {
+    margin-top: 25px; /* Reverted from 31px */
+    font-size: 12px; /* Reverted from 15px */
+    color: #666666;
+    line-height: 1.6;
+}
+
+.footerText a {
+    color: #000000;
+    font-weight: bold;
+    text-decoration: none;
+}
+
+.footerText a:hover {
+    text-decoration: underline;
+} 

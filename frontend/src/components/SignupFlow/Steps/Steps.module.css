@@ -1,0 +1,197 @@
+.stepContainer {
+    padding: 10px 0;
+}
+
+.label {
+    display: block;
+    text-align: left;
+    margin-bottom: 15px; /* Increased margin */
+    font-weight: 700; /* Bolder */
+    color: #000; /* Black color */
+    font-size: 1.3em; /* Larger font size */
+}
+
+/* Style for the description text */
+.description {
+    font-size: 0.95em;
+    color: #555;
+    text-align: left;
+    margin-top: 0;
+    margin-bottom: 15px; /* Add space below description */
+}
+
+/* Style for button groups like gender selection */
+.buttonGroup {
+    display: flex;
+    gap: 10px;
+}
+
+.choiceButton {
+    flex-grow: 1;
+    padding: 12px 15px;
+    border: 1px solid #ccc;
+    border-radius: 25px; /* Rounded buttons */
+    background-color: #fff;
+    cursor: pointer;
+    font-size: 1em;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+    color: #555; /* Default icon color (adjust as needed) */
+}
+
+.choiceButton svg { /* Target the SVG icon directly */
+    vertical-align: middle; /* Helps align icon with potential text */
+}
+
+.choiceButton:hover {
+    background-color: #f8f8f8;
+    border-color: #bbb;
+    color: #333; /* Slightly darker icon on hover */
+}
+
+.choiceButton.selected {
+    background-color: #FE466C;
+    color: #fff; /* White icon when selected */
+    border-color: #FE466C;
+}
+
+/* Basic error message style */
+.errorMessage {
+    color: #dc3545; /* Bootstrap danger color */
+    font-size: 0.9em;
+    text-align: left;
+    margin-top: -10px; /* Adjust spacing */
+    margin-bottom: 15px;
+}
+
+/* Hide default file input */
+.hiddenInput {
+    display: none;
+}
+
+/* Styles for Profile Picture Slots */
+.profileSlotsContainer {
+    display: flex;
+    justify-content: space-between; /* Distribute slots evenly */
+    gap: 15px;
+    margin-top: 15px;
+    margin-bottom: 20px;
+}
+
+.profileSlot {
+    width: 140px; /* Adjust size as needed */
+    height: 140px;
+    border-radius: 12px;
+    border: 2px dashed #D0D5DD; /* Dashed border for empty */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden; /* Ensure image fits */
+    background-color: #F9FAFB; /* Light background for empty */
+    transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.profileSlot:hover {
+    border-color: #b0b5bd;
+    background-color: #f0f0f0;
+}
+
+.filledSlot {
+    border-style: solid; /* Solid border when filled */
+    border-color: #eee; /* Light solid border */
+    cursor: default; /* No pointer cursor when filled */
+    background-color: #fff; /* White background when filled */
+}
+
+.filledSlot:hover {
+     border-color: #eee; /* Keep border color on hover when filled */
+     background-color: #fff;
+}
+
+.uploadPlaceholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    color: #667085;
+}
+
+.uploadPlaceholder svg {
+    color: #98A2B3;
+}
+
+.uploadPlaceholder span {
+    font-size: 0.9em;
+    font-weight: 500;
+}
+
+/* Styles for file previews (within a slot) */
+.previewImage {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* Remove or adjust existing preview styles if they conflict */
+/* .previewContainer { ... } */
+/* .previewItem { ... } */
+/* .singlePreview { ... } */
+
+/* Updated remove button style (already updated in previous step, verify position/size) */
+.removeButton {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background-color: #FE466C; /* Use primary red/pink */
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 28px; /* Larger remove button */
+    height: 28px;
+    font-size: 16px;
+    font-weight: bold;
+    line-height: 26px; /* Adjust for new size */
+    text-align: center;
+    cursor: pointer;
+    padding: 0;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    transition: background-color 0.2s ease;
+}
+
+.removeButton:hover {
+    background-color: #E43A5F; /* Darker shade */
+}
+
+/* Remove or comment out Status text style */
+/*
+.statusText { ... }
+.statusText.complete { ... }
+*/
+
+/* Style for non-image file info (e.g., PDF preview) */
+.fileInfo {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    font-size: 0.8em;
+    color: #555;
+    padding: 5px;
+    text-align: center;
+    word-break: break-all;
+}
+
+.fileInfo svg {
+    color: #888;
+}
+
+/* Helper text style */
+.helpText {
+    font-size: 0.9em;
+    color: #666;
+    text-align: left;
+    margin-top: 10px;
+} 

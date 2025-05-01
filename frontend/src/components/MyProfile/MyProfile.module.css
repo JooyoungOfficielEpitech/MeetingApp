@@ -1,0 +1,238 @@
+/* MyProfile Styles */
+
+.pageWrapper {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+.contentWrapper {
+    display: flex;
+    flex-grow: 1;
+}
+
+.mainContent {
+    flex-grow: 1;
+    padding: 30px;
+    background-color: #f8f9fa; /* Light background */
+    display: flex; /* Use flex to center the profile card like area */
+    flex-direction: column; /* Stack title and card */
+    align-items: center; /* Center horizontally */
+}
+
+.mainContent h2 {
+    margin-bottom: 30px; /* Space below title */
+}
+
+/* Style for the main profile content area, mimicking ProfileCard */
+.profileCardLike {
+    background-color: #f8f9fa; /* Match background */
+    padding: 30px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%; /* Take available width */
+    max-width: 700px; /* Or adjust as desired */
+}
+
+/* Styles copied/adapted from ProfileCard.module.css */
+.photoGrid {
+    display: grid;
+    grid-template-columns: repeat(3, 180px);
+    gap: 15px;
+    margin-bottom: 30px;
+    justify-content: center;
+}
+
+/* Container for photo + potential overlay */
+.photoContainer {
+    position: relative; 
+    width: 180px;
+    height: 180px;
+    border-radius: 12px; 
+    overflow: hidden; 
+    background-color: #f0f0f0; /* Background for empty slots */
+}
+
+/* Add cursor pointer in edit mode */
+.editablePhoto {
+    cursor: pointer;
+}
+
+.profilePhoto {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    background-color: #e9ecef;
+}
+
+/* Optional style for the placeholder logo shown in view mode */
+.placeholderLogo {
+    opacity: 0.6; /* Make placeholder slightly transparent */
+    /* Add other styles if needed */
+}
+
+/* Delete button style */
+.deletePhotoButton {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background-color: rgba(0, 0, 0, 0.6);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    font-size: 12px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    z-index: 1; /* Above the image */
+}
+
+/* Show delete button on container hover when editing */
+.editablePhoto:hover .deletePhotoButton {
+    opacity: 1;
+}
+
+/* Style for the upload prompt in empty slots during edit */
+.uploadPrompt {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: rgba(255, 255, 255, 0.8); /* Slight white overlay */
+    color: #555;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: center;
+    opacity: 0; /* Hidden by default */
+    transition: opacity 0.2s ease;
+}
+
+/* Show upload prompt on empty container hover when editing */
+.editablePhoto:hover .uploadPrompt {
+    opacity: 1;
+}
+
+.infoBox {
+    background-color: #ffffff;
+    border-radius: 15px;
+    padding: 25px 30px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    width: fit-content;
+    min-width: 300px;
+    text-align: center;
+    margin-top: 10px; /* Space between photos and info box */
+}
+
+/* Styles for each info item row */
+.infoItem {
+    display: flex;
+    align-items: center;
+    justify-content: space-between; /* Label on left, value/input on right */
+    padding: 12px 0; /* Vertical padding */
+    border-bottom: 1px solid #f0f0f0; /* Separator line */
+    gap: 20px; /* Space between label and value */
+}
+
+.infoItem:last-child {
+    border-bottom: none; /* Remove border for the last item */
+}
+
+.infoItem label {
+    font-weight: 500;
+    color: #555;
+    flex-shrink: 0; /* Prevent label from shrinking */
+}
+
+/* Style adjustments for values/inputs within infoItem */
+.infoItem span {
+    font-weight: 500; 
+    color: #333;
+    text-align: right;
+}
+
+.infoItem .inputField,
+.infoItem .inputFieldSmall {
+    margin-bottom: 0; /* Remove margin from inputs inside item */
+    text-align: right; /* Align input text to the right */
+    /* Reset width slightly if needed */
+    /* width: auto; */ 
+}
+.infoItem .inputField {
+    /* max-width: 200px; */ /* Adjust max-width if needed */
+}
+.infoItem .inputFieldSmall {
+    /* width: 60px; */ /* Keep small width */
+}
+
+/* Input field styles (Keep general definition if used elsewhere, or remove if only used in infoItem) */
+.inputField,
+.inputFieldSmall {
+    padding: 8px 12px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    font-size: 1em;
+}
+
+/* Button container */
+.buttonContainer {
+    margin-top: 25px; /* Space above buttons */
+    display: flex;
+    gap: 15px; /* Space between buttons */
+    justify-content: center; /* Center buttons */
+}
+
+/* General button style */
+.button {
+    padding: 10px 25px;
+    border: none;
+    border-radius: 8px;
+    font-size: 1em;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* Specific button styles */
+.editButton {
+    background-color: #FE466C; /* Primary pink color */
+    color: white;
+}
+.editButton:hover {
+    background-color: #E43A5F; /* Darker pink */
+}
+
+.saveButton {
+    background-color: #FE466C; /* Primary pink color */
+    color: white;
+}
+.saveButton:hover {
+    background-color: #E43A5F;
+}
+
+/* Style for disabled save button */
+.saveButton:disabled {
+    background-color: #fecdd6; /* Lighter pink */
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+.cancelButton {
+    background-color: #333; /* Dark gray / black */
+    color: white;
+}
+.cancelButton:hover {
+    background-color: #000; /* Black */
+}

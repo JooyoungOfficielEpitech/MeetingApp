@@ -1,0 +1,13 @@
+/* Footer Styles */
+.appFooter {
+    height: 32px; /* Reverted from 40px */
+    background-color: #f8f8f8;
+    border-top: 1px solid #e0e0e0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 0.64em; /* Reverted from 0.8em */
+    color: #666;
+    width: 100%;
+    box-sizing: border-box;
+} 

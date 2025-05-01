@@ -1,0 +1,47 @@
+/* Sidebar Styles */
+.sidebar {
+    width: 280px; /* Reverted from 350px */
+    background-color: #fff;
+    border-right: 1px solid #e0e0e0;
+    height: calc(100vh - 48px - 32px); /* Reverted from 60px 40px */
+    padding: 16px 0; /* Reverted from 20px */
+    display: flex;
+    flex-direction: column;
+    transition: width 0.2s ease; /* Optional: Add transition */
+}
+
+.sidebar nav ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.sidebar nav li {
+    padding: 10px 24px; /* Reverted from 12px 30px */
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 12px; /* Reverted from 15px */
+    color: #555;
+    font-weight: 500;
+    border-right: 2px solid transparent; /* Reverted from 3px */
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.sidebar nav li:hover {
+    background-color: #f8f8f8;
+    color: #000;
+}
+
+.sidebar nav li.active {
+    background-color: #FFF1F3; /* Light pink background */
+    color: #FE466C; /* Primary pink color */
+    border-right-color: #FE466C; /* Pink indicator */
+    font-weight: 600;
+}
+
+.sidebar nav li svg {
+    margin-bottom: -1.6px; /* Reverted from -2px */
+    width: 14px; /* Reverted from 18px */
+    height: 14px; /* Reverted from 18px */
+} 

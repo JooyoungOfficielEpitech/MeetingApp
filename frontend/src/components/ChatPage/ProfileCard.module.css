@@ -1,0 +1,237 @@
+/* ProfileCard Styles */
+.profileCard {
+    background-color: #f8f9fa; /* Lighter background */
+    padding: 24px; /* Reverted from 30px */
+    border-right: 1px solid #dee2e6; /* Separator line */
+    overflow-y: auto; /* Allow vertical scrolling if content overflows */
+    height: 100%; /* Ensure it takes full height of its container */
+    box-sizing: border-box; /* Include padding and border in the element's total width and height */
+    display: flex;
+    flex-direction: column;
+    align-items: center; /* Center the content blocks (grid, text container) */
+    /* text-align: center; Removed global text center */
+}
+
+/* Add styles for the ResizableBox wrapper if needed, for example, to ensure it fills height */
+.resizableBoxWrapper {
+    height: 100% !important; /* Override potential inline styles if necessary */
+    /* overflow: hidden; */ /* Removed again to allow handle interaction */
+    position: relative; /* Ensure absolute positioned children (handle) are relative to this */
+}
+
+
+/* Styles for the custom handle component's div */
+.customHandleW {
+    position: absolute;
+    width: 8px; /* Reverted from 10px */
+    height: 100%;
+    bottom: 0;
+    left: 0; /* Position at the boundary */
+    cursor: ew-resize;
+    /* background: transparent; */ /* Make invisible again */
+    background: rgba(255, 192, 203, 0.5); /* Pink semi-transparent background for debugging */
+    z-index: 10; /* Ensure it's on top */
+    /* box-sizing: border-box; */
+}
+
+.profileCard h3 {
+    margin-top: 0;
+    margin-bottom: 6px; /* Reverted from 8px */
+    font-size: 1.44em; /* Reverted from 1.8em */
+    font-weight: 600;
+    color: #343a40;
+}
+
+/* Style for Age/Height row */
+.infoRow {
+    display: flex;
+    gap: 6px; /* Reverted from 8px */
+    color: #495057; /* Darker gray for better contrast */
+    font-size: 0.88em; /* Reverted from 1.1em */
+    margin-bottom: 6px; /* Reverted from 8px */
+}
+
+.city {
+    color: #495057; /* Consistent darker gray */
+    font-size: 0.88em; /* Reverted from 1.1em */
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
+/* Updated grid for 3 larger photos */
+.photoGrid {
+    display: grid;
+    grid-template-columns: repeat(3, 144px); /* Reverted from 180px */
+    gap: 12px; /* Reverted from 15px */
+    margin-bottom: 24px; /* Reverted from 30px */
+    justify-content: center;
+}
+
+/* Container for each photo + overlay */
+.photoContainer {
+    position: relative; /* Needed for absolute positioning of overlay */
+    width: 144px; /* Reverted from 180px */
+    height: 144px; /* Reverted from 180px */
+    border-radius: 10px; /* Reverted from 12px */
+    overflow: hidden; /* Ensure overlay respects the border radius */
+}
+
+.profilePhoto {
+    display: block; 
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    background-color: #e9ecef;
+    /* 이전 확대 효과 transition 및 transform 제거 */
+    transition: filter 0.3s ease-in-out;
+}
+
+/* 이전 확대 효과 제거 */
+/*
+.photoContainer:hover .profilePhoto:not(.blurred) {
+    transform: scale(1.1); 
+    z-index: 1; 
+}
+*/
+
+/* Blur effect for locked photos */
+.blurred {
+    filter: blur(8px); /* Reverted from 10px */
+}
+
+/* Overlay shown on locked photos on hover */
+.unlockOverlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5); /* Dark semi-transparent overlay */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    opacity: 0;
+    transition: opacity 0.2s ease-in-out;
+    /* border-radius: inherit; Inherit from container is default */
+    cursor: default; /* Prevent text selection cursor on overlay */
+}
+
+/* Show overlay when hovering the photo container */
+.photoContainer:hover .unlockOverlay {
+    opacity: 1;
+}
+
+/* Style for the unlock button */
+.unlockButton {
+    background-color: #FE466C; /* Primary color */
+    color: white;
+    border: none;
+    padding: 8px 14px; /* Reverted from 10px 18px */
+    border-radius: 20px; /* Reverted from 25px */
+    cursor: pointer;
+    font-size: 0.72em; /* Reverted from 0.9em */
+    font-weight: 600;
+    box-shadow: 0 2px 3px rgba(0, 0, 0, 0.2); /* Reverted from 0 2px 4px */
+    transition: background-color 0.2s ease;
+}
+
+.unlockButton:hover {
+    background-color: #E43A5F; /* Darker shade on hover */
+}
+
+/* Container for text info box */
+.textInfoContainer {
+    width: 100%;
+    max-width: 456px; /* Reverted from 570px (144*3 + 12*2) */
+    margin-top: 8px; /* Reverted from 10px */
+    display: flex; /* Use flex to center the infoBox */
+    justify-content: center; /* Center the infoBox horizontally */
+}
+
+/* The rounded box for text info */
+.infoBox {
+    background-color: #ffffff; /* White background */
+    border-radius: 12px; /* Reverted from 15px */
+    padding: 20px 24px; /* Reverted from 25px 30px */
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08); /* Reverted from 0 4px 12px */
+    width: fit-content; /* Adjust width to content */
+    min-width: 240px; /* Ensure a minimum width */
+    text-align: center; /* Center text inside the box */
+}
+
+/* Adjustments for elements inside the box */
+.infoBox h3 {
+    margin-top: 0;
+    margin-bottom: 8px; /* Reverted from 10px */
+    font-size: 1.44em; /* Reverted from 1.8em */
+    font-weight: 600;
+    color: #343a40;
+}
+
+.infoBox .infoRow {
+    display: flex;
+    justify-content: center; /* Center age/height row */
+    gap: 6px; /* Reverted from 8px */
+    color: #495057;
+    font-size: 0.88em; /* Reverted from 1.1em */
+    margin-bottom: 8px; /* Reverted from 10px */
+}
+
+.infoBox .city {
+    color: #495057;
+    font-size: 0.88em; /* Reverted from 1.1em */
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
+/* Styles for the Expanded Photo View Area */
+.expandedPhotoView {
+    width: 100%;
+    max-width: 456px; /* Reverted from 570px */
+    margin-top: 20px; /* Reverted from 25px */
+    cursor: pointer;
+    aspect-ratio: 1 / 1;
+    overflow: hidden;
+    border-radius: 8px; /* Reverted from 10px */
+}
+
+.expandedPhotoView img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* Styles for the Photo Placeholder Area */
+.photoPlaceholder {
+    width: 100%; /* Match expanded view width */
+    max-width: 456px; /* Reverted from 570px */
+    margin-top: 20px; /* Reverted from 25px */
+    aspect-ratio: 1 / 1; /* Match expanded view aspect ratio */
+    border: 2px dashed #d0d0d0; /* Dashed border */
+    border-radius: 8px; /* Reverted from 10px */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #a0a0a0; /* Placeholder text color */
+    font-size: 0.72em; /* Reverted from 0.9em */
+    box-sizing: border-box; /* Include border in size */
+}
+
+/* Style for the Leave Chat button */
+.leaveChatButton {
+    /* Inherits general .button styles */
+    margin-top: 20px; /* Reverted from 25px */
+    background-color: #6c757d; /* A neutral gray color */
+    color: white;
+    width: 100%; /* Occupy full width of its container */
+    max-width: 456px; /* Reverted from 570px */
+    padding: 10px 0; /* Reverted from 12px */
+    border: none; /* Ensure no border if .button has one */
+    border-radius: 6px; /* Reverted from 8px */
+    cursor: pointer;
+}
+
+.leaveChatButton:hover {
+    background-color: #5a6268;
+} 

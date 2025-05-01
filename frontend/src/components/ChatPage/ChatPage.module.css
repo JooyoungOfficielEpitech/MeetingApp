@@ -1,0 +1,21 @@
+/* ChatPage Styles */
+
+/* New wrapper for the whole page including header */
+.pageWrapper {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+.chatPageContainer {
+    display: flex;
+    /* height: calc(100vh - 60px); */ /* This might not be needed anymore if pageWrapper handles height */
+    flex-grow: 1; /* Let this container grow to fill space below header */
+    width: 100%;
+}
+
+.chatArea {
+    flex-grow: 1; /* Chat window takes remaining space */
+    border-right: 1px solid #e0e0e0;
+    /* Ensure height is managed correctly within ChatWindow */
+} 
